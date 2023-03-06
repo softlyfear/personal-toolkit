@@ -8,13 +8,10 @@
 
 #1 update server
 echo -e "\033[35m-----------------------------------------------------------------------------------\033[97m"
-echo -e "\033[35mStarting to set up\033[97m"
+echo -e "\033[35mUpdate & upgrade server\033[97m"
 echo -e "\033[35m-----------------------------------------------------------------------------------\033[97m"
-echo -e "\033[35m-----------------------------------------------------------------------------------\033[97m"
-echo -e "\033[35mUpdate & Upgrade Server\033[97m"
-echo -e "\033[35m-----------------------------------------------------------------------------------\033[97m"
-sudo apt update -q && \
-sudo apt upgrade -qy && \
+sudo apt update && \
+sudo apt upgrade -y \
 
 #2 setting up ssh login & disable password login
 echo -e "\033[35m-----------------------------------------------------------------------------------\033[97m"
@@ -23,9 +20,7 @@ echo -e "\033[35m---------------------------------------------------------------
 if [[ ! -d "/root/.ssh" ]]; then
   mkdir root/.ssh || exit
 fi
-echo -e "\033[35m-----------------------------------------------------------------------------------\033[97m"
-echo -e "\033[35mEnter your ssh public key[97m"
-echo -e "\033[35m-----------------------------------------------------------------------------------\033[97m"
+echo -e "\033[31mEnter your ssh public key\033[97m"
 IFS= read -r sshkey
 echo "${sshkey}" > /root/.ssh/authorized_keys
 sudo sed -i 's|^PermitRootLogin .*|PermitRootLogin prohibit-password|' /etc/ssh/sshd_config
@@ -43,7 +38,7 @@ echo -e "\033[35mInstalling Fail2Ban\033[97m"
 echo -e "\033[35m-----------------------------------------------------------------------------------\033[97m"
 sudo apt install -y fail2ban && \
 
-#4 install and configure Unf
+#4 install and configure unf
 echo -e "\033[35m-----------------------------------------------------------------------------------\033[97m"
 echo -e "\033[35mInstalling and configure Unf\033[97m"
 echo -e "\033[35m-----------------------------------------------------------------------------------\033[97m"
