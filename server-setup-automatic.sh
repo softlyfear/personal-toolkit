@@ -11,7 +11,7 @@ echo -e "\033[35m---------------------------------------------------------------
 echo -e "\033[35mUpdate & upgrade server\033[97m"
 echo -e "\033[35m-----------------------------------------------------------------------------------\033[97m"
 sudo apt update && \
-sudo apt upgrade -y \
+sudo apt upgrade -y && \
 
 #2 setting up ssh login & disable password login
 echo -e "\033[35m-----------------------------------------------------------------------------------\033[97m"
@@ -42,7 +42,7 @@ sudo apt install -y fail2ban && \
 echo -e "\033[35m-----------------------------------------------------------------------------------\033[97m"
 echo -e "\033[35mInstalling and configure Unf\033[97m"
 echo -e "\033[35m-----------------------------------------------------------------------------------\033[97m"
-sudo apt install -y ufw
+sudo apt install -y ufw && \
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 sudo ufw allow ssh
