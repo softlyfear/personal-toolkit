@@ -3,7 +3,7 @@
 # Configuring the server to run as root with ssh key only
 #########################################################
 # Automatic setup 
-# source <(https://raw.githubusercontent.com/softlyfear/my_script/main/server-setup-automatic.sh)
+# source <(curl -s https://raw.githubusercontent.com/softlyfear/my_script/main/server-setup-automatic.sh)
 #########################################################
 
 #1 update server
