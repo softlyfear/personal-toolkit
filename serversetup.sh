@@ -17,8 +17,9 @@ echo -e "\033[35mSetting up ssh login & disable password login\033[97m"
 if [[ ! -d "/root/.ssh" ]]; then
   mkdir root/.ssh || exit
 fi
-echo "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCorSuABVdEg6tXEyQQ5N1UW44qSKt15QVjtC2u1O866fPApcenxZAat0ZX54esA9Btf63WlfMPypsjFr3FtQU/AK3GR+5+SZoQTLKqxwfg3GVzksRitkbt33ppB5xI0H2c5oPP9atGpoOCHrTPBqEMD0QrP28UsHY4MQeCjwnbrDdUmMPb52lAEyQmHhMzNwvohYxSIkU/uWuK21e2kQ+F69vuPyDMEqiCDlq/Xmw6VY+SmQS+r2U1ap0J0dwM+5/ZFIlrrUU0fVVF9sXvmXI7yIZTT8LoVhNKNMPsmifzQvsIsNYnLPVidutMqWrWskDFCBQpKPgoDM1KHibKxMq1URplmhBAVVz9J3MewqDZ+844fHHcBEXtmcVstxAoVo2Wf9AeX5/V0eMdv6W81CD9FvmnHMOfHHmoLmD+GCWmbeXnM3TYCIJ0wWYEzKkYV1iMo/d8GYtxEO/ZLjzU2uurqPREN3zNMJxhe5s/115vSTtHIrK4fEjg4d/9miiMoj0= malygos@WIN-ODSO4HDAV3H
-" > /root/.ssh/authorized_keys
+echo -e "\033[35mEnter your ssh public key[97m"
+IFS= read -r sshkey
+echo "${sshkey}" > /root/.ssh/authorized_keys
 sudo sed -i 's|^PermitRootLogin .*|PermitRootLogin prohibit-password|' /etc/ssh/sshd_config
 sudo sed -i 's/^ChallengeResponseAuthentication\s.*$/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
 sudo sed -i 's/^#PasswordAuthentication\s.*$/PasswordAuthentication no/' /etc/ssh/sshd_config
