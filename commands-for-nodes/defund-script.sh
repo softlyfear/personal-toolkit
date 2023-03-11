@@ -67,17 +67,17 @@ voting() {
 
 #list all commands
 help() {
-  echo "\033[35m
-  list commands:
-    add - add a function to the bash profile to run when a user logs in
-    delegate - delegate tokens to yourself
-    balance - check balance
-    logs - check logs
-    status - check the synchronization status and show the last block
-    rewards - receive rewards from all validators
-    unjail - unjail validator
-    restart - restart node
-    voting - vote
-    help - list all commands
-  \033[97m"
+  echo -e "
+  \033[31mlist commands:\033[97m
+    \033[31madd\033[97m - \033[35madd a function to the bash profile to run when a user logs in\033[97m
+    \033[31mdelegate\033[97m - \033[35mdelegate tokens to yourself\033[97m
+    \033[31mbalance\033[97m - \033[35mcheck balance\033[97m
+    \033[31mlogs\033[97m - \033[35mcheck logs\033[97m
+    \033[31mstatus\033[97m - \033[35mcheck the synchronization status and show the last block\033[97m
+    \033[31mrewards\033[97m - \033[35mreceive rewards from all validators\033[97m
+    \033[31munjail\033[97m - \033[35munjail validator\033[97m
+    \033[31mrestart\033[97m - \033[35mrestart node\033[97m
+    \033[31mvoting\033[97m - \033[35mvote\033[97m
+    \033[31mhelp\033[97m - \033[35mlist all commands\033[97m
+    "
 }
