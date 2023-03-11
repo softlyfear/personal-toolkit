@@ -15,7 +15,7 @@ add() {
 
 #delegate tokens to yourself
 delegate() {
-  echo -e "\033[35mHow many tokens delegate?\033[97m"
+  echo -e "\033[35mHow many tokens delegate? Enter an integer  \033[97m"
   IFS= read -r quantity
   "${project}" tx staking delegate $("${project}" keys show wallet --bech val -a) "${quantity}"000000"${token}" --from wallet --chain-id "${chainid}" --gas-prices 0.1"${token}" --gas-adjustment 1.5 --gas auto -y
 }
