@@ -22,7 +22,7 @@ if [[ ! -f "${HOME}"/.ssh ]]; then
 fi
 echo -e "\033[35mEnter your ssh public key\033[97m"
 IFS= read -r sshkey
-echo "${sshkey}" > /root/.ssh/authorized_keysy
+echo "${sshkey}" > /root/.ssh/authorized_keys
 sudo sed -i 's|^PermitRootLogin .*|PermitRootLogin prohibit-password|' /etc/ssh/sshd_config
 sudo sed -i 's/^ChallengeResponseAuthentication\s.*$/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
 sudo sed -i 's/^#PasswordAuthentication\s.*$/PasswordAuthentication no/' /etc/ssh/sshd_config
