@@ -10,7 +10,11 @@ token="unibi"
 
 #add a function to the bash profile to run when a user logs in
 add() {
-  echo "sourse "${addbash}"-script.sh" >> .bash_profile
+  if [[ ! -f "${HOME}"/.bash_profile ]]; then
+    touch "${HOME}"/.bash_profile || exit
+    source "${HOME}"/.bash_profile
+  fi
+  echo "sourse ${addbash}-script.sh" >> .bash_profile
 }
 
 #delegate tokens to yourself
