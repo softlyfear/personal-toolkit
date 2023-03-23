@@ -14,7 +14,7 @@ add() {
     touch "${HOME}"/.bash_profile || exit
     source "${HOME}"/.bash_profile
   fi
-  echo "sourse ${addbash}-script.sh" >> .bash_profile
+  echo "source ${addbash}-script.sh" >> .bash_profile
 }
 
 #delegate tokens to yourself
