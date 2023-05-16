@@ -10,7 +10,7 @@ token="ufetf"
 
 #add a function to the bash profile to run when a user logs in
 add() {
-  echo "sourse "${addbash}"-script.sh" >> .bash_profile
+  echo "source "${addbash}"-script.sh" >> .bash_profile
 }
 
 #delegate tokens to yourself
