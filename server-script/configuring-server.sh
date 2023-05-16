@@ -3,7 +3,7 @@
 # Configuring the server to run as a root user
 ################################################
 # Automatic setup
-# source <(curl -s https://raw.githubusercontent.com/softlyfear/my-script/main/server-script/server-setup-automatic.sh)
+# source <(curl -s https://raw.githubusercontent.com/softlyfear/my-script/main/server-script/configuring-server.sh)
 ################################################
 
 #1 update server
