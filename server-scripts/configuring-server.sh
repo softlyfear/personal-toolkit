@@ -17,35 +17,34 @@ sudo apt upgrade -y && \
 
 
 #2 setting up ssh login & disable password login
-# Read the SSH public key from the user input
+echo -e "\033[35m-----------------------------------------------------------------\033[97m"
+echo -e "\033[35mSetting up ssh login & disable password login\033[97m"
+echo -e "\033[35m-----------------------------------------------------------------\033[97m"
+echo -e "\033[35m-----------------------------------------------------------------\033[97m"
+echo -e "\033[35mEnter your ssh public key\033[97m"
+echo -e "\033[35m-----------------------------------------------------------------\033[97m"
 IFS= read -r sshkey
-
 # Check if the .ssh directory exists, create it if it doesn't
 if [ ! -d /root/.ssh ]; then
   mkdir -p /root/.ssh
   echo -e "\033[32mCreated directory /root/.ssh\033[97m"
 fi
-
 # Check if the authorized_keys file exists, create it if it doesn't
 if [ ! -f /root/.ssh/authorized_keys ]; then
   touch /root/.ssh/authorized_keys
   echo -e "\033[32mCreated file /root/.ssh/authorized_keys\033[97m"
 fi
-
 # Append the SSH key to the authorized_keys file
 echo "${sshkey}" >> /root/.ssh/authorized_keys
 echo -e "\033[32mAdded SSH key to /root/.ssh/authorized_keys\033[97m"
-
 # Set the appropriate permissions for the .ssh directory and authorized_keys file
 chmod 700 /root/.ssh
 chmod 600 /root/.ssh/authorized_keys
 echo -e "\033[32mSet permissions for /root/.ssh and /root/.ssh/authorized_keys\033[97m"
-
 # Optionally, you might want to disable password login by editing the sshd_config
 sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
 sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
 echo -e "\033[32mDisabled password login in /etc/ssh/sshd_config\033[97m"
-
 # Restart the SSH service to apply changes
 systemctl restart sshd
 echo -e "\033[32mRestarted SSH service\033[97m"
