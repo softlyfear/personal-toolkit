@@ -15,7 +15,6 @@ echo -e "\033[35m---------------------------------------------------------------
 sudo apt update && \
 sudo apt upgrade -y && \
 
-
 #2 setting up ssh login & disable password login
 echo -e "\033[35m-----------------------------------------------------------------\033[97m"
 echo -e "\033[35mSetting up ssh login & disable password login\033[97m"
@@ -41,21 +40,21 @@ echo -e "\033[32mAdded SSH key to /root/.ssh/authorized_keys\033[97m"
 chmod 700 /root/.ssh
 chmod 600 /root/.ssh/authorized_keys
 echo -e "\033[32mSet permissions for /root/.ssh and /root/.ssh/authorized_keys\033[97m"
-# Optionally, you might want to disable password login by editing the sshd_config
-sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
-sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
-echo -e "\033[32mDisabled password login in /etc/ssh/sshd_config\033[97m"
+# Disable password login by editing the sshd_config
+sudo sed -i 's|^PermitRootLogin .*|PermitRootLogin no|' /etc/ssh/sshd_config
+sudo sed -i 's|^ChallengeResponseAuthentication .*|ChallengeResponseAuthentication no|' /etc/ssh/sshd_config
+sudo sed -i 's|^#PasswordAuthentication .*|PasswordAuthentication no|' /etc/ssh/sshd_config
+sudo sed -i 's|^#PermitEmptyPasswords .*|PermitEmptyPasswords no|' /etc/ssh/sshd_config
+sudo sed -i 's|^#PubkeyAuthentication .*|PubkeyAuthentication yes|' /etc/ssh/sshd_config
 # Restart the SSH service to apply changes
 systemctl restart sshd
 echo -e "\033[32mRestarted SSH service\033[97m"
-
 
 #3 install fail2Ban
 echo -e "\033[35m-----------------------------------------------------------------\033[97m"
 echo -e "\033[35mInstalling Fail2Ban\033[97m"
 echo -e "\033[35m-----------------------------------------------------------------\033[97m"
 sudo apt install -y fail2ban && \
-
 
 #4 install and configure Unf
 echo -e "\033[35m-----------------------------------------------------------------\033[97m"
