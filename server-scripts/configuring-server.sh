@@ -161,11 +161,6 @@ else
 fi
 
 # Instructions for connecting
-echo -e "\033[35mConfiguration complete. Set up your terminal for private key authentication:\033[97m"
-echo -e "\033[35m- If using PuTTY: Load your private key (e.g., D:\\Crypto\\ssh-key\\local) in PuTTYgen, save as .ppk, and configure in 'Connection > SSH > Auth'.\033[97m"
-echo -e "\033[35m- If using OpenSSH (PowerShell/WSL): Ensure your key (e.g., D:/Crypto/ssh-key/local) is added with 'ssh-add' or specified in ~/.ssh/config.\033[97m"
-echo -e "\033[35mConnect using the server IP (find it with 'hostname -I', e.g., 192.168.56.101).\033[97m"
-echo -e "\033[35mExample command for OpenSSH: ssh root@192.168.56.101\033[97m"
 echo -e "\033[33mNote: Check /var/log/auth.log for troubleshooting.\033[97m"
 echo -e "\033[35m-----------------------------------------------------------------\033[97m"
 echo -e "\033[32mSSH setup successfully completed\033[97m"
