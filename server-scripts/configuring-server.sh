@@ -12,8 +12,7 @@ echo -e "\033[35mStarting to set up\033[97m"
 echo -e "\033[35m-----------------------------------------------------------------\033[97m"
 echo -e "\033[35mUpdate & Upgrade Server\033[97m"
 echo -e "\033[35m-----------------------------------------------------------------\033[97m"
-sudo apt update && \
-sudo apt upgrade -y && \
+sudo apt update && sudo apt upgrade -y || { echo "Ошибка при обновлении системы"; exit 1; }
 
 #2 setting up ssh login & disable password login
 echo -e "\033[35m-----------------------------------------------------------------\033[97m"
@@ -47,7 +46,7 @@ sudo sed -i 's|^#PasswordAuthentication .*|PasswordAuthentication no|' /etc/ssh/
 sudo sed -i 's|^#PermitEmptyPasswords .*|PermitEmptyPasswords no|' /etc/ssh/sshd_config
 sudo sed -i 's|^#PubkeyAuthentication .*|PubkeyAuthentication yes|' /etc/ssh/sshd_config
 # Restart the SSH service to apply changes
-systemctl restart sshd
+systemctl restart ssh.service || systemctl restart sshd.service || { echo "Ошибка: служба SSH не найдена"; exit 1; }
 echo -e "\033[32mRestarted SSH service\033[97m"
 
 #3 install fail2Ban
