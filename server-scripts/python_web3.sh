@@ -15,3 +15,6 @@ source .venv/bin/activate
 # Устанавливаем web3 в виртуальное окружение
 pip install web3 -y
 pip install --upgrade web3
+
+echo -e "\033[35meactivate - source .venv/bin/activate\033[97m"
+echo -e "\033[35mdeactivate - exit \033[97m"
