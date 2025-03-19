@@ -26,6 +26,9 @@ read NEW_USER
 sudo adduser --gecos "" --disabled-password "$NEW_USER"
 sudo passwd "$NEW_USER"  # Interactive password setup
 
+# Add a user to the SUDO group
+sudo usermod -aG sudo "$NEW_USER"
+
 # Set up .xsession for GNOME session
 sudo -u "$NEW_USER" bash -c "echo 'gnome-session' > /home/$NEW_USER/.xsession"
 sudo chown "$NEW_USER:$NEW_USER" /home/$NEW_USER/.xsession
