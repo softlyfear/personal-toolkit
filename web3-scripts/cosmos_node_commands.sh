@@ -3,10 +3,10 @@
 #Cosmos Variables Project forks
 ###############################
 
-addbash="defund"
-chainid="orbit-alpha-1"
-project="defundd"
-token="ufetf"
+addbash=""
+chainid=""
+project=""
+token=""
 
 #add a function to the bash profile to run when a user logs in
 add() {
