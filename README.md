@@ -7,7 +7,7 @@ source <(curl -s https://raw.githubusercontent.com/user/my-script/refs/heads/mai
 
 #### Install python+web3
 ```shell
-source <(curl -s https://raw.githubusercontent.com/user/my-script/refs/heads/main/server-scripts/python+web3.sh)
+source <(curl -s https://raw.githubusercontent.com/user/my-script/refs/heads/main/web3-scripts/python%2Bweb3.sh)
 ```
 
 #### Add gnome + xrdp
