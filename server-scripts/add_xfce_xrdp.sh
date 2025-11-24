@@ -1,10 +1,4 @@
 #!/bin/bash
-###############################################
-# Automatic setup
-# source <(curl -s https://raw.githubusercontent.com/softlyfear/my-script/refs/heads/main/server-scripts/add_xfce_xrdp.sh)
-###############################################
-
-
 # Update the system to ensure all packages are up-to-date
 sudo apt update && sudo apt upgrade -y
 

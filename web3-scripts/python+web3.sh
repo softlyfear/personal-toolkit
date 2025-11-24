@@ -1,9 +1,4 @@
 #!/bin/bash
-###############################################
-# Automatic setup
-# source <(curl -s https://raw.githubusercontent.com/softlyfear/my-script/refs/heads/main/server-scripts/python_web3.sh)
-###############################################
-
 # Создаём виртуальное окружение в директории .venv
 apt install python3-venv -y
 python3 -m venv .venv

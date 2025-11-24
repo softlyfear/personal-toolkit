@@ -5,9 +5,9 @@
 source <(curl -s https://raw.githubusercontent.com/softlyfear/my-script/refs/heads/main/server-scripts/configuring_server.sh)
 ```
 
-#### Install python web3
+#### Install python+web3
 ```shell
-source <(curl -s https://raw.githubusercontent.com/softlyfear/my-script/refs/heads/main/server-scripts/python_web3.sh)
+source <(curl -s https://raw.githubusercontent.com/softlyfear/my-script/refs/heads/main/server-scripts/python+web3.sh)
 ```
 
 #### Add gnome + xrdp
