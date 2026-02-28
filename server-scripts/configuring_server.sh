@@ -1,7 +1,7 @@
 #!/bin/bash
 ###############################################
 # Server hardening script (run as root)
-# Ubuntu/Debian focused (tested logic for Ubuntu 24.04)
+# Ubuntu/Debian focused (handles Ubuntu 24 ssh.socket)
 ###############################################
 set -euo pipefail
 
@@ -14,6 +14,9 @@ warn()  { echo -e "\033[33m[WARN]  $1\033[0m"; }
 err()   { echo -e "\033[31m[ERROR] $1\033[0m"; exit 1; }
 sep()   { echo -e "\033[35m-----------------------------------------------------------------\033[0m"; }
 
+# Safe systemd unit existence check (no pipefail+grep issues)
+unit_exists() { systemctl cat "$1" >/dev/null 2>&1; }
+
 #----------------------------------------------
 # 0. Root check + params
 #----------------------------------------------
@@ -22,7 +25,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 SSH_PORT="${1:-2222}"
-KEEP_PORT_22_FALLBACK="true" # safer rollout
+KEEP_PORT_22_FALLBACK="true"  # keep 22 temporarily for safe rollout
 
 if ! [[ "$SSH_PORT" =~ ^[0-9]+$ ]] || (( SSH_PORT < 1 || SSH_PORT > 65535 )); then
   err "Invalid SSH port: $SSH_PORT"
@@ -48,7 +51,7 @@ apt-get upgrade -y || err "apt-get upgrade failed"
 ok "System updated"
 
 #----------------------------------------------
-# 2. Install essential packages (no mail extras)
+# 2. Install essential packages
 #----------------------------------------------
 sep
 info "Installing essential security packages..."
@@ -138,8 +141,8 @@ ClientAliveCountMax 2
 LoginGraceTime 30
 EOF
 
-# Critical for Ubuntu 24+: socket activation may force port 22
-if systemctl list-unit-files | grep -q '^ssh.socket'; then
+# Ubuntu 24+: socket activation can force port 22 regardless of sshd_config
+if unit_exists ssh.socket; then
   if systemctl is-active --quiet ssh.socket || systemctl is-enabled --quiet ssh.socket; then
     warn "ssh.socket is active/enabled; disabling it to honor Port from sshd_config"
     systemctl disable --now ssh.socket || err "Failed to disable ssh.socket"
@@ -149,17 +152,17 @@ fi
 info "Validating sshd config..."
 sshd -t || err "sshd config validation failed"
 
-if systemctl list-unit-files | grep -q '^ssh\.service'; then
+if unit_exists ssh.service; then
   systemctl enable ssh.service || true
   systemctl restart ssh.service || err "Failed to restart ssh.service"
-elif systemctl list-unit-files | grep -q '^sshd\.service'; then
+elif unit_exists sshd.service; then
   systemctl enable sshd.service || true
   systemctl restart sshd.service || err "Failed to restart sshd.service"
 else
   err "No ssh service unit found (ssh.service/sshd.service)"
 fi
 
-# Verify effective port and listening socket before firewall changes
+# Verify effective port + listening socket BEFORE firewall changes
 if ! sshd -T | awk '/^port /{print $2}' | grep -qx "$SSH_PORT"; then
   err "Effective sshd port does not include $SSH_PORT"
 fi
