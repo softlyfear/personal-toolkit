@@ -1,6 +1,7 @@
 #!/bin/bash
 ###############################################
 # Server hardening script (run as root)
+# Ubuntu/Debian focused (tested logic for Ubuntu 24.04)
 ###############################################
 set -euo pipefail
 
@@ -14,33 +15,40 @@ err()   { echo -e "\033[31m[ERROR] $1\033[0m"; exit 1; }
 sep()   { echo -e "\033[35m-----------------------------------------------------------------\033[0m"; }
 
 #----------------------------------------------
-# 0. Root check
+# 0. Root check + params
 #----------------------------------------------
 if [[ $EUID -ne 0 ]]; then
   err "This script must be run as root. Use: sudo bash $0"
 fi
 
 SSH_PORT="${1:-2222}"
+KEEP_PORT_22_FALLBACK="true" # safer rollout
 
-# Non-interactive apt/dpkg to avoid mail/setup prompts
+if ! [[ "$SSH_PORT" =~ ^[0-9]+$ ]] || (( SSH_PORT < 1 || SSH_PORT > 65535 )); then
+  err "Invalid SSH port: $SSH_PORT"
+fi
+
+# Non-interactive apt/dpkg (avoid mail/setup dialogs)
 export DEBIAN_FRONTEND=noninteractive
 export APT_LISTCHANGES_FRONTEND=none
 export NEEDRESTART_MODE=a
 
 sep
 info "Server hardening script started"
-info "SSH port will be set to: $SSH_PORT"
+info "SSH port target: $SSH_PORT"
+info "Ping replies: DISABLED (always)"
 sep
 
 #----------------------------------------------
 # 1. Update & upgrade
 #----------------------------------------------
-info "Updating and upgrading system packages..."
-apt update && apt upgrade -y || err "System update failed"
+info "Updating package lists and upgrading packages..."
+apt-get update || err "apt-get update failed"
+apt-get upgrade -y || err "apt-get upgrade failed"
 ok "System updated"
 
 #----------------------------------------------
-# 2. Install essential packages
+# 2. Install essential packages (no mail extras)
 #----------------------------------------------
 sep
 info "Installing essential security packages..."
@@ -55,38 +63,15 @@ ok "Packages installed"
 # 3. Configure automatic security updates
 #----------------------------------------------
 sep
-info "Configuring automatic security updates..."
-echo 'Unattended-Upgrade::Automatic-Reboot "false";' \
-  > /etc/apt/apt.conf.d/51custom-unattended-upgrades
-dpkg-reconfigure -f noninteractive unattended-upgrades
+info "Configuring unattended-upgrades..."
+cat > /etc/apt/apt.conf.d/51custom-unattended-upgrades << 'EOF'
+Unattended-Upgrade::Automatic-Reboot "false";
+EOF
+dpkg-reconfigure -f noninteractive unattended-upgrades || err "unattended-upgrades reconfigure failed"
 ok "Automatic security updates configured"
 
 #----------------------------------------------
-# 4. Configure Fail2Ban
-#----------------------------------------------
-sep
-info "Configuring Fail2Ban..."
-cat > /etc/fail2ban/jail.local << JAILEOF
-[DEFAULT]
-bantime  = 3600
-findtime = 600
-maxretry = 3
-banaction = ufw
-
-[sshd]
-enabled  = true
-port     = $SSH_PORT
-logpath  = %(sshd_log)s
-backend  = systemd
-maxretry = 3
-JAILEOF
-
-systemctl enable fail2ban
-systemctl restart fail2ban
-ok "Fail2Ban configured and started"
-
-#----------------------------------------------
-# 5. SSH key setup
+# 4. SSH key setup (root)
 #----------------------------------------------
 sep
 info "Setting up SSH key authentication..."
@@ -96,139 +81,164 @@ chmod 700 /root/.ssh
 chown root:root /root/.ssh
 
 echo ""
-info "Enter your SSH public key or path to a .pub file:"
-info "(Example: paste from ~/.ssh/id_rsa.pub or path like /tmp/key.pub)"
+info "Enter SSH public key OR path to .pub file:"
 read -r sshkey_input
 
-sshkey=""
 if [[ -f "$sshkey_input" ]]; then
-  sshkey=$(tr -d '\r\n' < "$sshkey_input")
+  sshkey="$(tr -d '\r\n' < "$sshkey_input")"
   ok "Public key loaded from file: $sshkey_input"
 else
-  sshkey=$(echo "$sshkey_input" | tr -d '\r\n')
+  sshkey="$(echo "$sshkey_input" | tr -d '\r\n')"
   ok "Public key entered manually"
 fi
 
 if ! echo "$sshkey" | grep -qE "^(ssh-(rsa|dss|ecdsa|ed25519)|ecdsa-[a-zA-Z0-9]+) "; then
-  err "Invalid SSH key format. Expected key starting with 'ssh-rsa', 'ssh-ed25519', etc."
+  err "Invalid SSH public key format"
 fi
 
-if grep -qF "$sshkey" /root/.ssh/authorized_keys 2>/dev/null; then
-  warn "This key is already in authorized_keys, skipping"
+touch /root/.ssh/authorized_keys
+if grep -qF "$sshkey" /root/.ssh/authorized_keys; then
+  warn "Key already exists in /root/.ssh/authorized_keys"
 else
   echo "$sshkey" >> /root/.ssh/authorized_keys
-  ok "SSH key added to /root/.ssh/authorized_keys"
+  ok "SSH key added"
 fi
 
 chmod 600 /root/.ssh/authorized_keys
 chown root:root /root/.ssh/authorized_keys
 
 #----------------------------------------------
-# 6. Harden sshd_config
+# 5. Harden SSH (with Ubuntu 24 ssh.socket fix)
 #----------------------------------------------
 sep
 info "Hardening SSH configuration..."
 
-SSHD_CONFIG="/etc/ssh/sshd_config"
+SSHD_MAIN="/etc/ssh/sshd_config"
+SSHD_DROPIN_DIR="/etc/ssh/sshd_config.d"
+SSHD_DROPIN_FILE="${SSHD_DROPIN_DIR}/99-hardening.conf"
 
-cp "$SSHD_CONFIG" "${SSHD_CONFIG}.bak_$(date +%Y%m%d_%H%M%S)"
-ok "Backup of sshd_config created"
+cp "$SSHD_MAIN" "${SSHD_MAIN}.bak_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$SSHD_DROPIN_DIR"
 
-declare -A SSH_SETTINGS=(
-  ["Port"]="$SSH_PORT"
-  ["PermitRootLogin"]="prohibit-password"
-  ["PubkeyAuthentication"]="yes"
-  ["PasswordAuthentication"]="no"
-  ["KbdInteractiveAuthentication"]="no"
-  ["PermitEmptyPasswords"]="no"
-  ["X11Forwarding"]="no"
-  ["AllowAgentForwarding"]="no"
-  ["MaxAuthTries"]="3"
-  ["MaxSessions"]="3"
-  ["ClientAliveInterval"]="300"
-  ["ClientAliveCountMax"]="2"
-  ["LoginGraceTime"]="30"
-)
+cat > "$SSHD_DROPIN_FILE" << EOF
+Port $SSH_PORT
+PermitRootLogin prohibit-password
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+PermitEmptyPasswords no
+UsePAM yes
+X11Forwarding no
+AllowAgentForwarding no
+MaxAuthTries 3
+MaxSessions 3
+ClientAliveInterval 300
+ClientAliveCountMax 2
+LoginGraceTime 30
+EOF
 
-for key in "${!SSH_SETTINGS[@]}"; do
-  val="${SSH_SETTINGS[$key]}"
-  if grep -qE "^#?${key}\b" "$SSHD_CONFIG"; then
-    sed -i "s|^#\?${key}.*|${key} ${val}|" "$SSHD_CONFIG"
-  else
-    echo "${key} ${val}" >> "$SSHD_CONFIG"
+# Critical for Ubuntu 24+: socket activation may force port 22
+if systemctl list-unit-files | grep -q '^ssh.socket'; then
+  if systemctl is-active --quiet ssh.socket || systemctl is-enabled --quiet ssh.socket; then
+    warn "ssh.socket is active/enabled; disabling it to honor Port from sshd_config"
+    systemctl disable --now ssh.socket || err "Failed to disable ssh.socket"
   fi
-done
-
-info "Validating sshd_config..."
-if ! sshd -t; then
-  err "sshd_config validation failed! Check the configuration manually."
 fi
-ok "sshd_config is valid"
 
-if systemctl is-active --quiet ssh.service; then
-  systemctl restart ssh.service
-  ok "ssh.service restarted"
-elif systemctl is-active --quiet sshd.service; then
-  systemctl restart sshd.service
-  ok "sshd.service restarted"
+info "Validating sshd config..."
+sshd -t || err "sshd config validation failed"
+
+if systemctl list-unit-files | grep -q '^ssh\.service'; then
+  systemctl enable ssh.service || true
+  systemctl restart ssh.service || err "Failed to restart ssh.service"
+elif systemctl list-unit-files | grep -q '^sshd\.service'; then
+  systemctl enable sshd.service || true
+  systemctl restart sshd.service || err "Failed to restart sshd.service"
 else
-  err "SSH service not found or inactive"
+  err "No ssh service unit found (ssh.service/sshd.service)"
 fi
 
-# Ensure effective config + listening port before firewall lock-down
-info "Checking effective SSH port..."
+# Verify effective port and listening socket before firewall changes
 if ! sshd -T | awk '/^port /{print $2}' | grep -qx "$SSH_PORT"; then
-  err "Effective sshd port is not $SSH_PORT (possible override in sshd_config.d)"
+  err "Effective sshd port does not include $SSH_PORT"
 fi
 
 if ! ss -tln | awk '{print $4}' | grep -qE "(^|:)$SSH_PORT$"; then
   err "sshd is not listening on port $SSH_PORT"
 fi
-ok "sshd is listening on port $SSH_PORT"
+
+ok "SSH configured and listening on port $SSH_PORT"
 
 #----------------------------------------------
-# 7. Configure UFW
+# 6. Configure UFW (AFTER SSH verification)
 #----------------------------------------------
 sep
 info "Configuring UFW firewall..."
 ufw default deny incoming
 ufw default allow outgoing
 
-ufw allow "$SSH_PORT"/tcp
-ufw limit "$SSH_PORT"/tcp
+ufw allow "${SSH_PORT}/tcp"
+ufw limit "${SSH_PORT}/tcp"
 
-if [[ "$SSH_PORT" != "22" ]]; then
-  # Keep 22 temporarily to avoid lockout; remove manually after testing
-  ufw allow 22/tcp
+if [[ "$SSH_PORT" != "22" && "$KEEP_PORT_22_FALLBACK" == "true" ]]; then
+  ufw allow 22/tcp || true
+  warn "Temporary 22/tcp fallback left enabled for safe rollout."
 fi
 
 ufw --force enable
-ok "UFW configured (port $SSH_PORT, rate-limited)"
+ok "UFW enabled"
 
 #----------------------------------------------
-# 8. Kernel / network hardening (sysctl)
+# 7. Configure Fail2Ban
 #----------------------------------------------
 sep
-info "Applying kernel network hardening..."
-cat > /etc/sysctl.d/99-hardening.conf << 'SYSEOF'
+info "Configuring Fail2Ban..."
+cat > /etc/fail2ban/jail.local << EOF
+[DEFAULT]
+bantime  = 3600
+findtime = 600
+maxretry = 3
+banaction = ufw
+
+[sshd]
+enabled  = true
+port     = $SSH_PORT
+backend  = systemd
+maxretry = 3
+EOF
+
+systemctl enable fail2ban
+systemctl restart fail2ban
+ok "Fail2Ban configured"
+
+#----------------------------------------------
+# 8. Kernel/network hardening (sysctl)
+#----------------------------------------------
+sep
+info "Applying kernel/network hardening..."
+cat > /etc/sysctl.d/99-hardening.conf << 'EOF'
 net.ipv4.tcp_syncookies = 1
 net.ipv4.tcp_max_syn_backlog = 2048
 net.ipv4.tcp_synack_retries = 2
 net.ipv4.conf.all.accept_redirects = 0
 net.ipv4.conf.default.accept_redirects = 0
 net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
 net.ipv4.conf.all.accept_source_route = 0
 net.ipv4.conf.default.accept_source_route = 0
 net.ipv4.conf.all.log_martians = 1
+net.ipv4.conf.default.log_martians = 1
 net.ipv4.conf.all.rp_filter = 1
 net.ipv4.conf.default.rp_filter = 1
 net.ipv4.icmp_echo_ignore_broadcasts = 1
+net.ipv4.icmp_echo_ignore_all = 1
 net.ipv6.conf.all.accept_redirects = 0
 net.ipv6.conf.default.accept_redirects = 0
-SYSEOF
+EOF
 
-sysctl --system > /dev/null 2>&1
-ok "Kernel hardening applied"
+sysctl --system > /dev/null 2>&1 || err "Failed to apply sysctl settings"
+ok "Kernel/network hardening applied (ping disabled)"
 
 #----------------------------------------------
 # 9. Restrict cron and at
@@ -244,35 +254,26 @@ ok "cron/at restricted"
 # 10. Final summary
 #----------------------------------------------
 sep
-sep
 ok "SERVER HARDENING COMPLETE"
 sep
 echo ""
-info "Summary of changes:"
-echo "  - System updated & upgraded"
-echo "  - UFW enabled: deny incoming, allow outgoing"
-echo "  - SSH port: $SSH_PORT (rate-limited via ufw limit)"
-echo "  - Fail2Ban: enabled for SSH (3 attempts, 1h ban)"
-echo "  - SSH: key-only auth, password disabled"
-echo "  - SSH: MaxAuthTries=3, LoginGraceTime=30s"
-echo "  - SSH: X11/AgentForwarding disabled"
-echo "  - Automatic security updates enabled"
-echo "  - Kernel hardening (sysctl) applied"
-echo "  - cron/at restricted to root"
-if [[ "$SSH_PORT" != "22" ]]; then
-  echo "  - Temporary fallback: 22/tcp is still allowed in UFW"
-fi
+info "Summary:"
+echo "  - System updated/upgraded"
+echo "  - SSH hardened, key-only auth"
+echo "  - SSH port set to: $SSH_PORT"
+echo "  - ssh.socket disabled (if present)"
+echo "  - UFW enabled + SSH rate limit"
+echo "  - Fail2Ban enabled for SSH"
+echo "  - Unattended upgrades enabled"
+echo "  - Sysctl hardening applied"
+echo "  - IPv4 ping replies disabled (always)"
 echo ""
-sep
-warn "!!! CRITICAL: DO NOT close this session yet !!!"
-warn "Open a NEW terminal and verify SSH access:"
-echo ""
-echo "    ssh -p $SSH_PORT root@<your-server-ip>"
-echo ""
-if [[ "$SSH_PORT" != "22" ]]; then
-  warn "After successful login on port $SSH_PORT, remove fallback rule:"
-  echo "    ufw delete allow 22/tcp"
+warn "DO NOT CLOSE THIS SESSION YET."
+echo "Test in a NEW terminal:"
+echo "  ssh -p $SSH_PORT root@<your-server-ip>"
+if [[ "$SSH_PORT" != "22" && "$KEEP_PORT_22_FALLBACK" == "true" ]]; then
   echo ""
+  warn "After successful login on $SSH_PORT, remove fallback rule:"
+  echo "  ufw delete allow 22/tcp"
 fi
-warn "Only after successful login in the new terminal, close this one."
 sep
