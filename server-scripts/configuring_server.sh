@@ -14,13 +14,18 @@ err()   { echo -e "\033[31m[ERROR] $1\033[0m"; exit 1; }
 sep()   { echo -e "\033[35m-----------------------------------------------------------------\033[0m"; }
 
 #----------------------------------------------
-# 0. Root check (FIRST thing)
+# 0. Root check
 #----------------------------------------------
 if [[ $EUID -ne 0 ]]; then
   err "This script must be run as root. Use: sudo bash $0"
 fi
 
 SSH_PORT="${1:-2222}"
+
+# Non-interactive apt/dpkg to avoid mail/setup prompts
+export DEBIAN_FRONTEND=noninteractive
+export APT_LISTCHANGES_FRONTEND=none
+export NEEDRESTART_MODE=a
 
 sep
 info "Server hardening script started"
@@ -39,12 +44,10 @@ ok "System updated"
 #----------------------------------------------
 sep
 info "Installing essential security packages..."
-apt install -y \
+apt-get install -y --no-install-recommends \
   fail2ban \
   ufw \
   unattended-upgrades \
-  apt-listchanges \
-  logwatch \
   || err "Package installation failed"
 ok "Packages installed"
 
@@ -55,30 +58,11 @@ sep
 info "Configuring automatic security updates..."
 echo 'Unattended-Upgrade::Automatic-Reboot "false";' \
   > /etc/apt/apt.conf.d/51custom-unattended-upgrades
-dpkg-reconfigure -plow unattended-upgrades
+dpkg-reconfigure -f noninteractive unattended-upgrades
 ok "Automatic security updates configured"
 
 #----------------------------------------------
-# 4. Configure UFW
-#----------------------------------------------
-sep
-info "Configuring UFW firewall..."
-ufw default deny incoming
-ufw default allow outgoing
-
-ufw allow "$SSH_PORT"/tcp
-ufw limit "$SSH_PORT"/tcp
-
-if [[ "$SSH_PORT" != "22" ]]; then
-  ufw delete allow ssh 2>/dev/null || true
-  ufw delete limit ssh 2>/dev/null || true
-fi
-
-ufw --force enable
-ok "UFW configured (port $SSH_PORT, rate-limited)"
-
-#----------------------------------------------
-# 5. Configure Fail2Ban
+# 4. Configure Fail2Ban
 #----------------------------------------------
 sep
 info "Configuring Fail2Ban..."
@@ -102,7 +86,7 @@ systemctl restart fail2ban
 ok "Fail2Ban configured and started"
 
 #----------------------------------------------
-# 6. SSH key setup
+# 5. SSH key setup
 #----------------------------------------------
 sep
 info "Setting up SSH key authentication..."
@@ -140,7 +124,7 @@ chmod 600 /root/.ssh/authorized_keys
 chown root:root /root/.ssh/authorized_keys
 
 #----------------------------------------------
-# 7. Harden sshd_config
+# 6. Harden sshd_config
 #----------------------------------------------
 sep
 info "Hardening SSH configuration..."
@@ -190,6 +174,36 @@ elif systemctl is-active --quiet sshd.service; then
 else
   err "SSH service not found or inactive"
 fi
+
+# Ensure effective config + listening port before firewall lock-down
+info "Checking effective SSH port..."
+if ! sshd -T | awk '/^port /{print $2}' | grep -qx "$SSH_PORT"; then
+  err "Effective sshd port is not $SSH_PORT (possible override in sshd_config.d)"
+fi
+
+if ! ss -tln | awk '{print $4}' | grep -qE "(^|:)$SSH_PORT$"; then
+  err "sshd is not listening on port $SSH_PORT"
+fi
+ok "sshd is listening on port $SSH_PORT"
+
+#----------------------------------------------
+# 7. Configure UFW
+#----------------------------------------------
+sep
+info "Configuring UFW firewall..."
+ufw default deny incoming
+ufw default allow outgoing
+
+ufw allow "$SSH_PORT"/tcp
+ufw limit "$SSH_PORT"/tcp
+
+if [[ "$SSH_PORT" != "22" ]]; then
+  # Keep 22 temporarily to avoid lockout; remove manually after testing
+  ufw allow 22/tcp
+fi
+
+ufw --force enable
+ok "UFW configured (port $SSH_PORT, rate-limited)"
 
 #----------------------------------------------
 # 8. Kernel / network hardening (sysctl)
@@ -245,6 +259,9 @@ echo "  - SSH: X11/AgentForwarding disabled"
 echo "  - Automatic security updates enabled"
 echo "  - Kernel hardening (sysctl) applied"
 echo "  - cron/at restricted to root"
+if [[ "$SSH_PORT" != "22" ]]; then
+  echo "  - Temporary fallback: 22/tcp is still allowed in UFW"
+fi
 echo ""
 sep
 warn "!!! CRITICAL: DO NOT close this session yet !!!"
@@ -252,5 +269,10 @@ warn "Open a NEW terminal and verify SSH access:"
 echo ""
 echo "    ssh -p $SSH_PORT root@<your-server-ip>"
 echo ""
+if [[ "$SSH_PORT" != "22" ]]; then
+  warn "After successful login on port $SSH_PORT, remove fallback rule:"
+  echo "    ufw delete allow 22/tcp"
+  echo ""
+fi
 warn "Only after successful login in the new terminal, close this one."
 sep
