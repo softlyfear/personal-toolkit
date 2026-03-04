@@ -32,13 +32,13 @@ svcctl start postgresql
 svcctl stop docker
 ```
 
-#### `devsetup` by direct link (no pre-install needed)
+#### `Devsetup` by direct link (no pre-install needed)
 Runs `devsetup` directly from GitHub and installs the full default stack: `git`, `uv`, `docker`, and `postgresql`
 ```shell
 bash <(curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/dev-tools/install-dev-tools.sh)
 ```
 
-#### `devsetup` with explicit selection
+#### `Devsetup` with explicit selection
 Runs `devsetup` from GitHub with your chosen packages only (e.g. `git uv` or `docker postgresql`)
 ```shell
 bash <(curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/dev-tools/install-dev-tools.sh) git uv docker postgresql
