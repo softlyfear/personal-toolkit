@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TOOLS=("git" "uv" "postgresql" "docker")
+TOOLS=("git" "uv" "make" "postgresql" "docker")
 APT_UPDATED=0
 SUDO=""
 
@@ -18,7 +18,7 @@ Usage:
   ${cmd}
   ${cmd} --all
   ${cmd} --interactive
-  ${cmd} <git|uv|postgresql|docker> [...]
+  ${cmd} <git|uv|make|postgresql|docker> [...]
 
 Examples:
   ${cmd}
@@ -54,7 +54,19 @@ install_git() {
 install_uv() {
   info "Installing uv..."
   curl -fsSL https://astral.sh/uv/install.sh | sh
+  if [[ -f "$HOME/.local/bin/env" ]]; then
+    # shellcheck disable=SC1091
+    source "$HOME/.local/bin/env"
+  else
+    warn "uv env file not found at \$HOME/.local/bin/env"
+  fi
   ok "uv installed"
+}
+
+install_make() {
+  info "Installing make..."
+  apt_install make
+  ok "make installed"
 }
 
 install_postgresql() {
@@ -143,10 +155,17 @@ for tool in "${selected[@]}"; do
   case "$tool" in
     git) install_git ;;
     uv) install_uv ;;
+    make) install_make ;;
     postgresql | postgres | pg) install_postgresql ;;
     docker) install_docker ;;
     *) err "Unknown tool: $tool. Allowed: ${TOOLS[*]}" ;;
   esac
 done
+
+if [[ " ${selected[*]} " == *" uv "* && -f "$HOME/.local/bin/env" ]]; then
+  printf '\n'
+  warn "USE: source \$HOME/.local/bin/env"
+  printf '\n'
+fi
 
 ok "All selected tools installed"
