@@ -1,5 +1,6 @@
 .PHONY: help install update run test test-v test-cov test-watch clean fmt type check docker-build docker-up docker-down docker-logs migrate migrate-create db-upgrade db-downgrade pre-commit
 
+PROJECT_NAME := <PROJECT_NAME>
 RED    := \033[0;31m
 GREEN  := \033[0;32m
 YELLOW := \033[0;33m
@@ -9,7 +10,7 @@ NC     := \033[0m
 .DEFAULT_GOAL := help
 
 help:
-	@echo "$(BLUE)Web Shop$(NC)"
+	@echo "$(BLUE)$(PROJECT_NAME)$(NC)"
 	@echo ""
 	@echo "$(GREEN)Dev:$(NC)"
 	@echo "  install        — Install/sync dependencies (uv)"
