@@ -45,11 +45,15 @@ curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/server-sc
   -o /tmp/setup.sh && bash /tmp/setup.sh
 ```
 
-Default port `2244/tcp` · custom port:
+Default port `2244/tcp` · custom port · optional flags:
 
 ```bash
 bash /tmp/setup.sh 2255
+bash /tmp/setup.sh --user softly --password 'MySecret123'
+bash /tmp/setup.sh -u admin -p a3f9c2e1
 ```
+
+Without flags: username prompt · password step asks **generate hex8?** (default yes) or manual entry · credentials in summary
 
 **Install — one-liner**
 
