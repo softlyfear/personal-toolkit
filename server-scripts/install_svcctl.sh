@@ -1,12 +1,33 @@
 #!/usr/bin/env bash
+#
+# install_svcctl.sh — install svcctl wrapper to /usr/local/bin
+#
+# Usage:  bash install_svcctl.sh
+# Requires: curl; root or sudo
+#
 set -euo pipefail
 
-BASE_URL="https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts"
-BIN_DIR="/usr/local/bin"
 
-info() { echo -e "\033[35m[INFO]\033[0m $1"; }
-ok() { echo -e "\033[32m[OK]\033[0m   $1"; }
-err() { echo -e "\033[31m[ERR]\033[0m  $1"; exit 1; }
+# =============================================================================
+# Constants
+# =============================================================================
+
+readonly BASE_URL="https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts"
+readonly BIN_DIR="/usr/local/bin"
+
+
+# =============================================================================
+# UI helpers
+# =============================================================================
+
+info()  { echo -e "\033[35m[INFO]  $1\033[0m" >&2; }
+ok()    { echo -e "\033[32m[OK]    $1\033[0m" >&2; }
+err()   { echo -e "\033[31m[ERROR] $1\033[0m" >&2; exit 1; }
+
+
+# =============================================================================
+# MAIN
+# =============================================================================
 
 if ! command -v curl >/dev/null 2>&1; then
   err "curl is required"

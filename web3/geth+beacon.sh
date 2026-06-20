@@ -1,51 +1,112 @@
-# обновляем пакеты
-sudo apt -y update && sudo apt -y upgrade
+#!/usr/bin/env bash
+#
+# geth+beacon.sh — Sepolia execution (geth) + consensus (Prysm beacon) node setup
+#
+# Usage:  bash geth+beacon.sh
+# Requires: Ubuntu/Debian; root or sudo
+#
+# After setup, wait for sync (may take 1–2 hours). Verify with commands at the bottom.
+#
+set -euo pipefail
 
-# устанавливаем зависимости
-sudo apt-get install coreutils curl iptables build-essential \
-git wget lz4 jq make gcc nano automake autoconf tmux htop \
-nvme-cli libgbm1 pkg-config libssl-dev libleveldb-dev tar \
-clang bsdmainutils ncdu unzip libleveldb-dev -y
 
-# обновляем дистрибутив
-sudo apt dist-upgrade -y && sudo apt autoremove -y
+# =============================================================================
+# Constants
+# =============================================================================
 
-# устанавливаем 'ethereum'
-sudo add-apt-repository -y ppa:ethereum/ethereum && \
-sudo apt-get update && \
-sudo apt-get install ethereum -y
+readonly GETH_VERSION="1.15.11-36b2371c"
+readonly GETH_ARCHIVE="geth-linux-amd64-${GETH_VERSION}.tar.gz"
+readonly GETH_URL="https://gethstore.blob.core.windows.net/builds/${GETH_ARCHIVE}"
+readonly JWT_SECRET="/var/lib/secrets/jwt.hex"
+readonly GETH_DATA="${HOME}/geth/data"
+readonly BEACON_HOME="${HOME}/beacon"
 
-# скачиваем 'geth'
-wget https://gethstore.blob.core.windows.net/builds/geth-linux-amd64-1.15.11-36b2371c.tar.gz && \
-tar -xvf geth-linux-amd64-1.15.11-36b2371c.tar.gz && \
-mv geth-linux-amd64-1.15.11-36b2371c/geth /usr/bin/geth && \
-rm -Rvf geth-linux-amd64-1.15.11-36b2371c*
 
-# проверяем присутствие 'geth'
-which geth
+# =============================================================================
+# UI helpers
+# =============================================================================
 
-# создаём каталог для работы 'geth'
-mkdir -p $HOME/geth/data
+info()  { echo -e "\033[35m[INFO]  $1\033[0m" >&2; }
+ok()    { echo -e "\033[32m[OK]    $1\033[0m" >&2; }
+warn()  { echo -e "\033[33m[WARN]  $1\033[0m" >&2; }
+err()   { echo -e "\033[31m[ERROR] $1\033[0m" >&2; exit 1; }
 
-# генерируем секреты
-sudo mkdir -p /var/lib/secrets
-sudo openssl rand -hex 32 | tr -d '\n' | sudo tee /var/lib/secrets/jwt.hex > /dev/null
 
-# включаем ufw
-# Доступ к порту разрешённому ip для большей безопасности
-# sudo ufw allow from <IP_вашего_ПК> to any port <PORT>
-sudo ufw allow 9999/tcp
-sudo ufw allow 3500/tcp
-sudo ufw allow 4000/tcp
-sudo ufw allow 30303/tcp
-sudo ufw allow 30303/udp
-sudo ufw allow 12000/udp
-sudo ufw allow 13000/tcp
-sudo ufw allow 22/tcp
-sudo ufw allow 443/tcp
+# =============================================================================
+# Helpers
+# =============================================================================
 
-# создаём сервис 'geth'
-sudo tee /etc/systemd/system/geth.service > /dev/null <<EOF
+SUDO=""
+if [[ "$(id -u)" -ne 0 ]]; then
+  SUDO="sudo"
+fi
+
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+# --- Step 1: system packages ---
+info "Updating system packages..."
+$SUDO apt-get update -y
+$SUDO apt-get upgrade -y
+
+info "Installing build dependencies..."
+$SUDO apt-get install -y coreutils curl iptables build-essential \
+  git wget lz4 jq make gcc nano automake autoconf tmux htop \
+  nvme-cli libgbm1 pkg-config libssl-dev libleveldb-dev tar \
+  clang bsdmainutils ncdu unzip
+
+info "Dist-upgrade and autoremove..."
+$SUDO apt-get dist-upgrade -y
+$SUDO apt-get autoremove -y
+ok "System packages ready"
+
+# --- Step 2: ethereum PPA (legacy tooling) ---
+info "Installing ethereum package from PPA..."
+$SUDO add-apt-repository -y ppa:ethereum/ethereum
+$SUDO apt-get update
+$SUDO apt-get install -y ethereum
+ok "ethereum package installed"
+
+# --- Step 3: geth binary ---
+info "Downloading geth ${GETH_VERSION}..."
+wget -q "${GETH_URL}"
+tar -xf "${GETH_ARCHIVE}"
+$SUDO mv "geth-linux-amd64-${GETH_VERSION}/geth" /usr/bin/geth
+rm -rf "geth-linux-amd64-${GETH_VERSION}" "${GETH_ARCHIVE}"
+command -v geth >/dev/null || err "geth not found in PATH"
+ok "geth installed: $(geth version | head -1)"
+
+# --- Step 4: data dirs and JWT secret ---
+mkdir -p "${GETH_DATA}"
+$SUDO mkdir -p /var/lib/secrets
+if [[ ! -f "${JWT_SECRET}" ]]; then
+  openssl rand -hex 32 | tr -d '\n' | $SUDO tee "${JWT_SECRET}" >/dev/null
+  $SUDO chmod 600 "${JWT_SECRET}"
+fi
+ok "Data directories and JWT secret ready"
+
+# --- Step 5: UFW ---
+# Restrict by source IP for better security:
+#   sudo ufw allow from <YOUR_PC_IP> to any port <PORT>
+info "Configuring UFW..."
+$SUDO apt-get install -y ufw
+$SUDO ufw allow 9999/tcp
+$SUDO ufw allow 3500/tcp
+$SUDO ufw allow 4000/tcp
+$SUDO ufw allow 30303/tcp
+$SUDO ufw allow 30303/udp
+$SUDO ufw allow 12000/udp
+$SUDO ufw allow 13000/tcp
+$SUDO ufw allow 22/tcp
+$SUDO ufw allow 443/tcp
+$SUDO ufw --force enable
+ok "UFW enabled"
+
+# --- Step 6: geth systemd unit ---
+info "Creating geth.service..."
+$SUDO tee /etc/systemd/system/geth.service > /dev/null <<EOF
 [Unit]
 Description=Geth
 After=network-online.target
@@ -56,41 +117,40 @@ Restart=always
 RestartSec=5s
 User=root
 WorkingDirectory=${HOME}/geth
-ExecStart=$(which geth) \
-  --sepolia \
-  --syncmode snap \
-  --http \
-  --http.addr "0.0.0.0" \
-  --http.port 9999 \
-  --authrpc.addr "127.0.0.1" \
-  --authrpc.port 8551 \
-  --http.api "eth,net,engine,admin" \
-  --http.corsdomain "*" \
-  --http.vhosts "*" \
-  --datadir ${HOME}/geth/data \
-  --authrpc.jwtsecret /var/lib/secrets/jwt.hex
+ExecStart=$(command -v geth) \\
+  --sepolia \\
+  --syncmode snap \\
+  --http \\
+  --http.addr "0.0.0.0" \\
+  --http.port 9999 \\
+  --authrpc.addr "127.0.0.1" \\
+  --authrpc.port 8551 \\
+  --http.api "eth,net,engine,admin" \\
+  --http.corsdomain "*" \\
+  --http.vhosts "*" \\
+  --datadir ${GETH_DATA} \\
+  --authrpc.jwtsecret ${JWT_SECRET}
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# запускаем 'geth'
-sudo systemctl enable geth && \
-sudo systemctl daemon-reload && \
-sudo systemctl restart geth
+$SUDO systemctl daemon-reload
+$SUDO systemctl enable geth
+$SUDO systemctl restart geth
+ok "geth service started"
 
-# смотрим логи
-journalctl -f -n 100 -u geth -o cat
+warn "Wait for geth log: 'Post-merge network, but no beacon client seen' — then beacon starts below"
+info "Check geth logs: journalctl -f -n 100 -u geth -o cat"
 
-# дождитесь следующего лога, в котором говорится, что необходимо запустить ещё и 'beacon-client'
-WARN [05-13|11:22:05.061] Post-merge network, but no beacon client seen. Please launch one to follow the chain!
+# --- Step 7: Prysm beacon ---
+info "Installing Prysm beacon..."
+mkdir -p "${BEACON_HOME}/bin" "${BEACON_HOME}/data"
+curl -fsSL https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh \
+  -o "${BEACON_HOME}/bin/prysm.sh"
+chmod +x "${BEACON_HOME}/bin/prysm.sh"
 
-# подготавливаем директории
-mkdir -p $HOME/beacon/bin $HOME/beacon/data
-curl https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh --output $HOME/beacon/bin/prysm.sh
-chmod +x $HOME/beacon/bin/prysm.sh
-
-# создаём сервис 'beacon'
-sudo tee /etc/systemd/system/beacon.service > /dev/null <<EOF
+info "Creating beacon.service..."
+$SUDO tee /etc/systemd/system/beacon.service > /dev/null <<EOF
 [Unit]
 Description=Prysm Beacon
 After=network-online.target
@@ -100,39 +160,40 @@ Type=simple
 Restart=always
 RestartSec=5s
 User=root
-ExecStart=${HOME}/beacon/bin/prysm.sh beacon-chain \
-  --sepolia \
-  --http-modules=beacon,config,node,validator \
-  --rpc-host=0.0.0.0 \
-  --rpc-port=4000 \
-  --grpc-gateway-host=0.0.0.0 \
-  --grpc-gateway-port=3500 \
-  --datadir ${HOME}/beacon/data \
-  --execution-endpoint=http://127.0.0.1:8551 \
-  --checkpoint-sync-url=https://checkpoint-sync.sepolia.ethpandaops.io/ \
-  --genesis-beacon-api-url=https://checkpoint-sync.sepolia.ethpandaops.io/ \
-  --jwt-secret=/var/lib/secrets/jwt.hex \
-  --accept-terms-of-use \
+ExecStart=${BEACON_HOME}/bin/prysm.sh beacon-chain \\
+  --sepolia \\
+  --http-modules=beacon,config,node,validator \\
+  --rpc-host=0.0.0.0 \\
+  --rpc-port=4000 \\
+  --grpc-gateway-host=0.0.0.0 \\
+  --grpc-gateway-port=3500 \\
+  --datadir ${BEACON_HOME}/data \\
+  --execution-endpoint=http://127.0.0.1:8551 \\
+  --checkpoint-sync-url=https://checkpoint-sync.sepolia.ethpandaops.io/ \\
+  --genesis-beacon-api-url=https://checkpoint-sync.sepolia.ethpandaops.io/ \\
+  --jwt-secret=${JWT_SECRET} \\
+  --accept-terms-of-use \\
   --subscribe-all-data-subnets
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# запускаем 'beacon'
-sudo systemctl enable beacon && \
-sudo systemctl daemon-reload && \
-sudo systemctl restart beacon
+$SUDO systemctl daemon-reload
+$SUDO systemctl enable beacon
+$SUDO systemctl restart beacon
+ok "beacon service started"
 
-# смотрим логи
-journalctl -f -n 100 -u beacon -o cat
-
-# теперь нужно дождаться, пока оба сервиса синхронизируются
-
-# проверка geth
-curl -s -X POST --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' \
--H "Content-Type: application/json" http://localhost:9999 | jq
-
-# проверка beacon
-curl -s http://localhost:3500/eth/v1/node/syncing | jq
-
-# ждём час-два до полной синхронизации
+# --- Step 8: verification hints ---
+echo ""
+info "Setup complete. Wait 1–2 hours for full sync, then verify:"
+echo ""
+echo "  # geth sync status"
+echo "  curl -s -X POST --data '{\"jsonrpc\":\"2.0\",\"method\":\"eth_syncing\",\"params\":[],\"id\":1}' \\"
+echo "    -H 'Content-Type: application/json' http://localhost:9999 | jq"
+echo ""
+echo "  # beacon sync status"
+echo "  curl -s http://localhost:3500/eth/v1/node/syncing | jq"
+echo ""
+echo "  # follow logs"
+echo "  journalctl -f -n 100 -u geth -o cat"
+echo "  journalctl -f -n 100 -u beacon -o cat"
