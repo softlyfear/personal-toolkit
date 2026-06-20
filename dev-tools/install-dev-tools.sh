@@ -1,14 +1,37 @@
 #!/usr/bin/env bash
+#
+# install-dev-tools.sh — install common development tools on Ubuntu/Debian
+#
+# Usage:  bash install-dev-tools.sh [--all|--interactive|tool...]
+# Tools:  git | uv | make | postgresql | docker
+# Requires: apt-get; root or sudo (except uv installs to user home)
+#
 set -euo pipefail
 
-TOOLS=("git" "uv" "make" "postgresql" "docker")
+
+# =============================================================================
+# Constants
+# =============================================================================
+
+readonly TOOLS=("git" "uv" "make" "postgresql" "docker")
+
 APT_UPDATED=0
 SUDO=""
 
-info() { echo -e "\033[35m[INFO]\033[0m $1"; }
-ok() { echo -e "\033[32m[OK]\033[0m   $1"; }
-warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
-err() { echo -e "\033[31m[ERR]\033[0m  $1"; exit 1; }
+
+# =============================================================================
+# UI helpers
+# =============================================================================
+
+info()  { echo -e "\033[35m[INFO]  $1\033[0m" >&2; }
+ok()    { echo -e "\033[32m[OK]    $1\033[0m" >&2; }
+warn()  { echo -e "\033[33m[WARN]  $1\033[0m" >&2; }
+err()   { echo -e "\033[31m[ERROR] $1\033[0m" >&2; exit 1; }
+
+
+# =============================================================================
+# Helpers
+# =============================================================================
 
 usage() {
   local cmd
@@ -44,6 +67,26 @@ apt_install() {
   apt_update_once
   $SUDO apt-get install -y "$@"
 }
+
+pick_interactive() {
+  local selected=()
+  local tool=""
+  local ans=""
+
+  for tool in "${TOOLS[@]}"; do
+    read -r -p "Install $tool? [y/N]: " ans
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+      selected+=("$tool")
+    fi
+  done
+
+  printf '%s\n' "${selected[@]}"
+}
+
+
+# =============================================================================
+# Tool installers
+# =============================================================================
 
 install_git() {
   info "Installing git..."
@@ -94,20 +137,10 @@ install_docker() {
   ok "docker installed and started"
 }
 
-pick_interactive() {
-  local selected=()
-  local tool=""
-  local ans=""
 
-  for tool in "${TOOLS[@]}"; do
-    read -r -p "Install $tool? [y/N]: " ans
-    if [[ "$ans" =~ ^[Yy]$ ]]; then
-      selected+=("$tool")
-    fi
-  done
-
-  printf '%s\n' "${selected[@]}"
-}
+# =============================================================================
+# MAIN
+# =============================================================================
 
 if ! need_cmd apt-get; then
   err "Supported only on apt-based systems (Ubuntu/Debian)"

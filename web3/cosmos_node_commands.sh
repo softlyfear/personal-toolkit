@@ -1,71 +1,103 @@
-#!/bin/bash
-###############################
-#Cosmos Variables Project forks
-###############################
+#!/usr/bin/env bash
+#
+# cosmos_node_commands.sh — Cosmos validator helper functions
+#
+# Usage:  customize variables below, then source this file or append to .bash_profile
+#         source cosmos_node_commands.sh
+#
+# Set project-specific values before sourcing:
+#   addbash, chainid, project, token
+#
+
+
+# =============================================================================
+# Project variables (customize per chain fork)
+# =============================================================================
 
 addbash=""
 chainid=""
 project=""
 token=""
 
-#add a function to the bash profile to run when a user logs in
+
+# =============================================================================
+# Validator commands
+# =============================================================================
+
+# Add auto-source hook to bash profile on login
 add() {
-  echo "source "${addbash}"-script.sh" >> .bash_profile
+  echo "source ${addbash}-script.sh" >> .bash_profile
 }
 
-#delegate tokens to yourself
+# Delegate tokens to own validator
 delegate() {
   echo -e "\033[35mHow many tokens delegate? Enter an integer\033[97m"
   IFS= read -r quantity
-  "${project}" tx staking delegate $("${project}" keys show wallet --bech val -a) "${quantity}"000000"${token}" --from wallet --chain-id "${chainid}" --gas-prices 0.1"${token}" --gas-adjustment 1.5 --gas auto -y
+  "${project}" tx staking delegate \
+    "$("${project}" keys show wallet --bech val -a)" \
+    "${quantity}000000${token}" \
+    --from wallet --chain-id "${chainid}" \
+    --gas-prices "0.1${token}" --gas-adjustment 1.5 --gas auto -y
 }
 
-#check balance
+# Show wallet balance
 balance() {
-  "${project}" q bank balances $("${project}" keys show wallet -a)
-echo -e "\033[35mDivide by 1000 for integers\033[97m"
+  "${project}" q bank balances "$("${project}" keys show wallet -a)"
+  echo -e "\033[35mDivide by 1000 for integers\033[97m"
 }
 
-#check logs
+# Follow node logs
 logs() {
   sudo journalctl -u "${project}" -f --no-hostname -o cat
 }
 
-#check status
+# Show sync status and latest block height
 status() {
   "${project}" status 2>&1 | jq .SyncInfo.catching_up
   "${project}" status 2>&1 | jq .SyncInfo.latest_block_height
 }
 
-#get rewards
+# Withdraw all staking rewards
 rewards() {
-  "${project}" tx distribution withdraw-all-rewards --from wallet --chain-id "${chainid}" --gas-prices 0.1"${token}" --gas-adjustment 1.5 --gas auto -y
+  "${project}" tx distribution withdraw-all-rewards \
+    --from wallet --chain-id "${chainid}" \
+    --gas-prices "0.1${token}" --gas-adjustment 1.5 --gas auto -y
 }
 
-#unjail validator
+# Unjail validator
 unjail() {
-  "${project}" tx slashing unjail --from wallet --chain-id "${chainid}" --gas-prices 0.1"${token}" --gas-adjustment 1.5 --gas auto -y
+  "${project}" tx slashing unjail \
+    --from wallet --chain-id "${chainid}" \
+    --gas-prices "0.1${token}" --gas-adjustment 1.5 --gas auto -y
 }
 
-#restart node
+# Restart node systemd unit
 restart() {
   sudo systemctl restart "${project}"
 }
 
-#proposals for voting
+# Vote on governance proposal
 voting() {
   echo -e "\033[35mEnter id proposals\033[97m"
   IFS= read -r id
   echo -e "\033[35mEnter yes or no small case\033[97m"
   IFS= read -r selection
   if [[ "${selection}" = yes ]]; then
-    "${project}" tx gov vote "${id}" "${selection}" --from wallet --chain-id "${chainid}" --gas-prices 0.1"${token}" --gas-adjustment 1.5 --gas auto -y
+    "${project}" tx gov vote "${id}" "${selection}" \
+      --from wallet --chain-id "${chainid}" \
+      --gas-prices "0.1${token}" --gas-adjustment 1.5 --gas auto -y
   elif [[ "${selection}" = no ]]; then
-    "${project}" tx gov vote "${id}" "${selection}" --from wallet --chain-id "${chainid}" --gas-prices 0.1"${token}" --gas-adjustment 1.5 --gas auto -y
+    "${project}" tx gov vote "${id}" "${selection}" \
+      --from wallet --chain-id "${chainid}" \
+      --gas-prices "0.1${token}" --gas-adjustment 1.5 --gas auto -y
   fi
 }
 
-#list all commands
+
+# =============================================================================
+# Help
+# =============================================================================
+
 help() {
   echo -e "
   \033[31mlist commands:\033[97m

@@ -1,12 +1,36 @@
 #!/usr/bin/env bash
+#
+# service-manager.sh — systemd wrapper for allowed services
+#
+# Usage:  bash service-manager.sh <action> <service...|all>
+#         svcctl <action> <service...|all>   (after install_svcctl.sh)
+#
+# Actions: start | stop | restart | enable | disable | status
+# Services: postgresql | docker (or aliases pg, postgres)
+#
 set -euo pipefail
 
-ALLOWED_SERVICES=("postgresql" "docker")
 
-info() { echo -e "\033[35m[INFO]\033[0m $1"; }
-ok() { echo -e "\033[32m[OK]\033[0m   $1"; }
-warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
-err() { echo -e "\033[31m[ERR]\033[0m  $1"; exit 1; }
+# =============================================================================
+# Constants
+# =============================================================================
+
+readonly ALLOWED_SERVICES=("postgresql" "docker")
+
+
+# =============================================================================
+# UI helpers
+# =============================================================================
+
+info()  { echo -e "\033[35m[INFO]  $1\033[0m" >&2; }
+ok()    { echo -e "\033[32m[OK]    $1\033[0m" >&2; }
+warn()  { echo -e "\033[33m[WARN]  $1\033[0m" >&2; }
+err()   { echo -e "\033[31m[ERROR] $1\033[0m" >&2; exit 1; }
+
+
+# =============================================================================
+# Helpers
+# =============================================================================
 
 usage() {
   local cmd
@@ -38,6 +62,11 @@ is_allowed() {
   done
   return 1
 }
+
+
+# =============================================================================
+# MAIN
+# =============================================================================
 
 if [[ $# -lt 2 ]]; then
   usage
