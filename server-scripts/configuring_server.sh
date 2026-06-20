@@ -2,7 +2,7 @@
 #
 # configuring_server.sh — initial VPS hardening (Ubuntu/Debian)
 #
-# Usage:  bash configuring_server.sh [ssh_port]   # default port: 2244
+# Usage:  bash configuring_server.sh [port] [--user NAME] [--password PASS]
 # Requires: root, interactive TTY (/dev/tty)
 #
 # Execution order (main):
@@ -49,6 +49,8 @@ ROLLBACK_UFW_SSH_RULE_ADDED=false
 ROLLBACK_UFW_SSH_PORT=""
 SCRIPT_SUCCEEDED=false
 SYSCTL_LOG=""
+SSH_USER_PASSWORD=""
+CLI_PRESET_PASSWORD=""
 
 
 # =============================================================================
@@ -68,6 +70,39 @@ sum_line()  { echo -e "  ${C_G}✔${C_R}  $1"; }
 sum_item()  { echo -e "  ${C_G}✔${C_R}  ${C_B}$1${C_R}${2:+ ${C_D}— $2${C_R}}"; }
 sum_cmd()   { echo -e "      ${C_Y}$1${C_R}"; }
 sum_note()  { echo -e "  ${C_Y}⚠${C_R}  $1"; }
+
+detect_server_ip() {
+  local ip=""
+
+  # Address the admin SSH'd into (best when script runs over SSH)
+  if [[ -n "${SSH_CONNECTION:-}" ]]; then
+    ip="$(awk '{print $3}' <<< "$SSH_CONNECTION")"
+    if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      printf '%s' "$ip"
+      return 0
+    fi
+  fi
+
+  # Default route source (typical VPS address)
+  if command -v ip >/dev/null 2>&1; then
+    ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}')"
+    if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      printf '%s' "$ip"
+      return 0
+    fi
+  fi
+
+  # First global IPv4 on the host
+  if command -v hostname >/dev/null 2>&1; then
+    ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      printf '%s' "$ip"
+      return 0
+    fi
+  fi
+
+  printf '%s' '<your-server-ip>'
+}
 
 print_final_summary() {
   echo ""
@@ -105,8 +140,17 @@ print_final_summary() {
   echo ""
   echo -e "${C_B}${C_BL}  Next steps${C_R}"
   echo ""
+
+  if [[ -n "${SSH_USER_PASSWORD:-}" ]]; then
+    echo -e "  ${C_B}Credentials${C_R} ${C_D}(save now — shown once)${C_R}"
+    echo ""
+    sum_cmd "User:     ${SSH_USER}"
+    sum_cmd "Password: ${SSH_USER_PASSWORD}"
+    echo ""
+  fi
+
   sum_note "DO NOT CLOSE THIS SESSION YET — test in a new terminal:"
-  sum_cmd "ssh -p ${SSH_PORT} ${SSH_USER}@<your-server-ip>"
+  sum_cmd "ssh -p ${SSH_PORT} ${SSH_USER}@$(detect_server_ip)"
   sum_cmd "sudo -i"
   echo ""
   echo -e "${C_M}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_R}"
@@ -169,6 +213,11 @@ prompt_yes_no() {
 }
 
 prompt_sudo_username() {
+  if [[ -n "${SSH_USER:-}" ]]; then
+    info "Using username: $SSH_USER"
+    return 0
+  fi
+
   local max_attempts=5
   local attempt=1
   local raw=""
@@ -193,32 +242,140 @@ prompt_sudo_username() {
   err "Invalid username after $max_attempts attempts"
 }
 
-passwd_tty() {
-  if [[ ! -r /dev/tty ]]; then
-    err "Password input requires a TTY. Download first: curl -fsSL URL -o /tmp/setup.sh && bash /tmp/setup.sh"
+generate_hex8_password() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 4
+  else
+    LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom | head -c 8
   fi
-  passwd "$1" < /dev/tty > /dev/tty 2>&1
+}
+
+set_user_password() {
+  local user="$1"
+  local pass="$2"
+
+  printf '%s:%s' "$user" "$pass" | chpasswd || err "Failed to set password for $user"
+  SSH_USER_PASSWORD="$pass"
 }
 
 prompt_set_password() {
   local user="$1"
+  local pass="" pass2=""
   local max_attempts=5
   local attempt=1
+
+  if [[ ! -r /dev/tty ]]; then
+    err "Password input requires a TTY. Download first: curl -fsSL URL -o /tmp/setup.sh && bash /tmp/setup.sh"
+  fi
 
   while (( attempt <= max_attempts )); do
     echo ""
     if (( attempt == 1 )); then
       info "Set password for $user:"
     else
-      warn "Passwords did not match or could not be set. Try again ($attempt/$max_attempts):"
+      warn "Passwords did not match or empty. Try again ($attempt/$max_attempts):"
     fi
-    if passwd_tty "$user"; then
+    IFS= read -rs pass < /dev/tty
+    echo >&2
+    info "Confirm password:"
+    IFS= read -rs pass2 < /dev/tty
+    echo >&2
+
+    if [[ -n "$pass" && "$pass" == "$pass2" ]]; then
+      set_user_password "$user" "$pass"
       ok "Password set for $user"
       return 0
     fi
     (( attempt++ )) || true
   done
+
   err "Failed to set password for $user after $max_attempts attempts"
+}
+
+setup_user_password() {
+  local user="$1"
+
+  if [[ -n "$CLI_PRESET_PASSWORD" ]]; then
+    set_user_password "$user" "$CLI_PRESET_PASSWORD"
+    ok "Password set for $user (from --password)"
+    return 0
+  fi
+
+  prompt_yes_no GENERATE_PASSWORD "Generate secure password (hex8)?" true
+
+  if [[ "$GENERATE_PASSWORD" == "true" ]]; then
+    local pass=""
+    pass="$(generate_hex8_password)"
+    [[ ${#pass} -eq 8 ]] || err "Failed to generate password for $user"
+    set_user_password "$user" "$pass"
+    ok "Password set for $user (auto-generated hex8 — shown once in summary)"
+    return 0
+  fi
+
+  prompt_set_password "$user"
+}
+
+
+# =============================================================================
+# CLI argument parsing
+# =============================================================================
+
+usage() {
+  cat <<EOF
+Usage:
+  $(basename "$0") [port] [--user NAME] [--password PASS]
+
+Options:
+  port              SSH port (default: ${DEFAULT_SSH_PORT})
+  --user, -u NAME   sudo username (default: prompt, fallback admin)
+  --password, -p    user password — skip password step (default: prompt or generate)
+  --help, -h        show this help
+
+Examples:
+  $(basename "$0")
+  $(basename "$0") 2255
+  $(basename "$0") --user softly --password 'MySecret123'
+  $(basename "$0") 2255 -u admin -p a3f9c2e1
+EOF
+}
+
+parse_cli_args() {
+  SSH_PORT="$DEFAULT_SSH_PORT"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --user | -u)
+        [[ $# -ge 2 ]] || err "--user requires a value"
+        SSH_USER="$(sanitize_username_input "$2")"
+        [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || err "Invalid --user: $2"
+        shift 2
+        ;;
+      --password | -p)
+        [[ $# -ge 2 ]] || err "--password requires a value"
+        CLI_PRESET_PASSWORD="$2"
+        shift 2
+        ;;
+      --help | -h)
+        usage
+        exit 0
+        ;;
+      -*)
+        err "Unknown option: $1 (try --help)"
+        ;;
+      *)
+        if [[ "$1" =~ ^[0-9]+$ ]]; then
+          SSH_PORT="$1"
+        else
+          err "Invalid argument: $1 (try --help)"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if ! [[ "$SSH_PORT" =~ ^[0-9]+$ ]] || (( SSH_PORT < 1 || SSH_PORT > 65535 )); then
+    err "Invalid SSH port: $SSH_PORT"
+  fi
 }
 
 
@@ -530,7 +687,7 @@ configure_sudo_access() {
       rm -f "$sudoers_file"
       ok "Removed NOPASSWD for $SSH_USER (password-only SSH mode)"
     fi
-    prompt_set_password "$SSH_USER"
+    setup_user_password "$SSH_USER"
     ok "SSH login configured for $SSH_USER (password only)"
     return
   fi
@@ -552,7 +709,7 @@ configure_sudo_access() {
     rm -f "$sudoers_file"
     ROLLBACK_SUDOERS_CREATED=false
     info "NOPASSWD disabled — $SSH_USER will need password for sudo"
-    prompt_set_password "$SSH_USER"
+    setup_user_password "$SSH_USER"
     ok "Sudo configured for $SSH_USER (password required — NOPASSWD disabled)"
   fi
 }
@@ -859,11 +1016,7 @@ if [[ $EUID -ne 0 ]]; then
   err "This script must be run as root. On a fresh VPS: bash $0"
 fi
 
-SSH_PORT="${1:-$DEFAULT_SSH_PORT}"
-if ! [[ "$SSH_PORT" =~ ^[0-9]+$ ]] || (( SSH_PORT < 1 || SSH_PORT > 65535 )); then
-  err "Invalid SSH port: $SSH_PORT"
-fi
-
+parse_cli_args "$@"
 verify_ssh_port_available "$SSH_PORT"
 
 export DEBIAN_FRONTEND=noninteractive
@@ -873,6 +1026,8 @@ export NEEDRESTART_MODE=a
 sep
 info "Server hardening script started"
 info "SSH port target: ${SSH_PORT}/tcp (both modes; UFW opens this port only)"
+[[ -n "${SSH_USER:-}" ]] && info "Preset username: ${SSH_USER}"
+[[ -n "$CLI_PRESET_PASSWORD" ]] && info "Preset password: provided via --password"
 sep
 
 # --- Step 1: system update ---
