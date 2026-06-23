@@ -45,6 +45,8 @@ if ! need_cmd apt-get; then
 fi
 
 export DEBIAN_FRONTEND=noninteractive
+export APT_LISTCHANGES_FRONTEND=none
+export NEEDRESTART_MODE=a
 
 # --- Step 1: APT ---
 info "APT: update package index"
@@ -57,7 +59,8 @@ info "APT: remove unused packages"
 $SUDO apt-get autoremove --purge -y
 
 info "APT: clean package cache"
-$SUDO apt-get autoclean -y
+$SUDO apt-get autoclean
+ok "APT updates completed"
 
 # --- Step 2: Snap (optional) ---
 if need_cmd snap; then
@@ -65,7 +68,7 @@ if need_cmd snap; then
   $SUDO snap refresh
   ok "Snap updates completed"
 else
-  warn "snap not found, skipping snap refresh"
+  info "snap not found, skipping"
 fi
 
 # --- Step 3: Flatpak (optional) ---
@@ -74,7 +77,7 @@ if need_cmd flatpak; then
   flatpak update -y
   ok "Flatpak updates completed"
 else
-  warn "flatpak not found, skipping flatpak update"
+  info "flatpak not found, skipping"
 fi
 
 ok "System update complete (apt + snap + flatpak)"
