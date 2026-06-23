@@ -251,7 +251,7 @@ generate_hex8_password() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 4
   else
-    LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom | head -c 8
+    { LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom || true; } | head -c 8
   fi
 }
 
@@ -761,6 +761,7 @@ remove_legacy_rsa_keys() {
 
 setup_ssh_authorized_key() {
   local ak="${SSH_USER_HOME}/.ssh/authorized_keys"
+  local sshkey=""
 
   mkdir -p "${SSH_USER_HOME}/.ssh"
   chmod 700 "${SSH_USER_HOME}/.ssh"
@@ -945,7 +946,7 @@ enable_time_sync() {
   timedatectl set-ntp true || err "Failed to enable NTP"
   sleep 1
 
-  local ntp_service=""
+  local ntp_service="" svc
   for svc in chrony chronyd systemd-timesyncd; do
     if systemctl is-active --quiet "$svc" 2>/dev/null; then
       ntp_service=$svc
@@ -1009,7 +1010,7 @@ ufw_limit_port_once() {
 ensure_root_only_allow() {
   local file="$1"
   [[ -f "$file" && "$(<"$file")" == "root" ]] && return 0
-  echo "root" > "$file"
+  printf 'root\n' > "$file"
   chmod 600 "$file"
 }
 
@@ -1023,7 +1024,7 @@ configure_journald_limits() {
     && grep -qF 'SystemMaxUse=200M' "$dropin_file" \
     && grep -qF 'RuntimeMaxUse=100M' "$dropin_file" \
     && grep -qF 'MaxRetentionSec=14day' "$dropin_file"; then
-    warn "journald limits already configured — skipping restart"
+    info "journald limits already configured — skipping restart"
     return 0
   fi
 

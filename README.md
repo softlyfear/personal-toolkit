@@ -8,7 +8,7 @@ Bash utilities for **Ubuntu / Debian** — run from GitHub, no clone required.
 
 ```
 my-script/
-├── server-scripts/     # VPS hardening, updates, svcctl
+├── server-scripts/     # VPS hardening, updates, svcctl, xrdp
 ├── dev-tools/          # devsetup, FastAPI Makefile
 └── web3/               # Cosmos, Ethereum nodes
 ```
@@ -21,9 +21,9 @@ my-script/
 
 [`configuring_server.sh`](server-scripts/configuring_server.sh) — first-run VPS setup.
 
-**Requirements:** root · interactive TTY · after setup — test SSH in a **new terminal**
+**Requirements:** root · interactive TTY (SSH session) · after setup — test SSH in a **new terminal**
 
-**One prompt:** SSH key only? → default **yes** (Enter)
+**Prompts:** SSH key only? → default **yes** · username → default `admin` · password setup or NOPASSWD sudo
 
 | | Key mode (default) | Password mode |
 |---|---|---|
@@ -35,35 +35,36 @@ my-script/
 | | |
 |---|---|
 | Firewall | UFW deny incoming · **only** `${PORT}/tcp` (`limit`) · logging on |
-| Also applied | Fail2Ban (sshd) · unattended-upgrades · NTP · sysctl · journald limits · cron/at → root only |
+| Also applied | Fail2Ban (sshd · banaction=ufw · systemd backend) · unattended-upgrades (no auto-reboot) · NTP · sysctl hardening · journald limits (200M / 14 days) · cron/at → root only |
 | Safety | rollback on failure · `ssh.socket` masked if port ≠ 22 · IPv4 only |
 
-**Install — download** (recommended)
+**Install**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/configuring_server.sh \
-  -o /tmp/setup.sh && bash /tmp/setup.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/configuring_server.sh)
 ```
 
 Default port `2244/tcp` · custom port · optional flags:
 
 ```bash
-bash /tmp/setup.sh 2255
-bash /tmp/setup.sh --user softly --password 'MySecret123'
-bash /tmp/setup.sh -u admin -p a3f9c2e1
+bash <(curl -fsSL .../configuring_server.sh) 2255
+bash <(curl -fsSL .../configuring_server.sh) --user softly --password 'MySecret123'
+bash <(curl -fsSL .../configuring_server.sh) -u admin -p a3f9c2e1
 ```
 
 Without flags: username prompt · password step asks **generate hex8?** (default yes) or manual entry · credentials in summary
 
-**Install — one-liner**
+<details>
+<summary><strong>All flags</strong></summary>
 
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/configuring_server.sh)
+| Flag | Short | Value | Default | Description |
+|---|---|---|---|---|
+| *(positional)* | | `port` | `2244` | SSH port |
+| `--user` | `-u` | `NAME` | prompt → `admin` | sudo username |
+| `--password` | `-p` | `PASS` | prompt or generate | user password — skips password step |
+| `--help` | `-h` | | | show help and exit |
 
-bash <(curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/configuring_server.sh) 2255
-```
-
-> One-liner needs a real TTY (SSH session). For SSH key paste, use **download** method.
+</details>
 
 **Connect**
 
@@ -87,20 +88,6 @@ sudo -i
 | Sysctl (per run) | `sudo cat /var/log/sysctl-hardening-*.log` |
 
 </details>
-
----
-
-### Remote Desktop (xrdp)
-
-GNOME or XFCE + new sudo user · RDP port `3389`.
-
-```bash
-# GNOME
-bash <(curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/add_gnome_xrdp.sh)
-
-# XFCE (lighter)
-bash <(curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/add_xfce_xrdp.sh)
-```
 
 ---
 
@@ -175,6 +162,20 @@ make help
 | `make docker-up` | start containers |
 
 </details>
+
+---
+
+## Remote Desktop (xrdp)
+
+GNOME or XFCE + new sudo user · RDP port `3389`.
+
+```bash
+# GNOME
+bash <(curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/add_gnome_xrdp.sh)
+
+# XFCE (lighter)
+bash <(curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/add_xfce_xrdp.sh)
+```
 
 ---
 
