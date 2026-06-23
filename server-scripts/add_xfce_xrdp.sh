@@ -44,19 +44,19 @@ setup_sudo() {
 prompt_new_user() {
   echo ""
   info "Enter new sudo username:"
-  read -r NEW_USER
+  read -r NEW_USER < /dev/tty
   [[ -n "$NEW_USER" ]] || err "Username cannot be empty"
 }
 
 configure_xfce_session() {
   local user_home="/home/${NEW_USER}"
 
-  $SUDO -u "$NEW_USER" bash -c "echo 'startxfce4' > '${user_home}/.xsession'"
-  $SUDO chown "${NEW_USER}:${NEW_USER}" "${user_home}/.xsession"
-
-  $SUDO -u "$NEW_USER" bash -c "echo 'export XAUTHORITY=\${HOME}/.Xauthority' > '${user_home}/.xsessionrc'"
-  $SUDO -u "$NEW_USER" bash -c "echo 'export XDG_CURRENT_DESKTOP=XFCE' >> '${user_home}/.xsessionrc'"
-  $SUDO chown "${NEW_USER}:${NEW_USER}" "${user_home}/.xsessionrc"
+  printf '%s\n' 'startxfce4' | $SUDO tee "${user_home}/.xsession" > /dev/null
+  $SUDO tee "${user_home}/.xsessionrc" > /dev/null <<'EOF'
+export XAUTHORITY=${HOME}/.Xauthority
+export XDG_CURRENT_DESKTOP=XFCE
+EOF
+  $SUDO chown "${NEW_USER}:${NEW_USER}" "${user_home}/.xsession" "${user_home}/.xsessionrc"
 }
 
 disable_root_xrdp_login() {

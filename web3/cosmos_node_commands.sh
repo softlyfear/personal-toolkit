@@ -82,11 +82,7 @@ voting() {
   IFS= read -r id
   echo -e "\033[35mEnter yes or no small case\033[97m"
   IFS= read -r selection
-  if [[ "${selection}" = yes ]]; then
-    "${project}" tx gov vote "${id}" "${selection}" \
-      --from wallet --chain-id "${chainid}" \
-      --gas-prices "0.1${token}" --gas-adjustment 1.5 --gas auto -y
-  elif [[ "${selection}" = no ]]; then
+  if [[ "${selection}" == "yes" || "${selection}" == "no" ]]; then
     "${project}" tx gov vote "${id}" "${selection}" \
       --from wallet --chain-id "${chainid}" \
       --gas-prices "0.1${token}" --gas-adjustment 1.5 --gas auto -y

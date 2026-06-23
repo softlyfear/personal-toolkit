@@ -44,21 +44,21 @@ setup_sudo() {
 prompt_new_user() {
   echo ""
   info "Enter new sudo username:"
-  read -r NEW_USER
+  read -r NEW_USER < /dev/tty
   [[ -n "$NEW_USER" ]] || err "Username cannot be empty"
 }
 
 configure_gnome_session() {
   local user_home="/home/${NEW_USER}"
 
-  $SUDO -u "$NEW_USER" bash -c "echo 'gnome-session' > '${user_home}/.xsession'"
-  $SUDO chown "${NEW_USER}:${NEW_USER}" "${user_home}/.xsession"
-
-  $SUDO -u "$NEW_USER" bash -c "echo 'export XAUTHORITY=\${HOME}/.Xauthority' > '${user_home}/.xsessionrc'"
-  $SUDO -u "$NEW_USER" bash -c "echo 'export GNOME_SHELL_SESSION_MODE=ubuntu' >> '${user_home}/.xsessionrc'"
-  $SUDO -u "$NEW_USER" bash -c "echo 'export XDG_CONFIG_DIRS=/etc/xdg/xdg-ubuntu:/etc/xdg' >> '${user_home}/.xsessionrc'"
-  $SUDO -u "$NEW_USER" bash -c "echo 'export XDG_CURRENT_DESKTOP=ubuntu:GNOME' >> '${user_home}/.xsessionrc'"
-  $SUDO chown "${NEW_USER}:${NEW_USER}" "${user_home}/.xsessionrc"
+  printf '%s\n' 'gnome-session' | $SUDO tee "${user_home}/.xsession" > /dev/null
+  $SUDO tee "${user_home}/.xsessionrc" > /dev/null <<'EOF'
+export XAUTHORITY=${HOME}/.Xauthority
+export GNOME_SHELL_SESSION_MODE=ubuntu
+export XDG_CONFIG_DIRS=/etc/xdg/xdg-ubuntu:/etc/xdg
+export XDG_CURRENT_DESKTOP=ubuntu:GNOME
+EOF
+  $SUDO chown "${NEW_USER}:${NEW_USER}" "${user_home}/.xsession" "${user_home}/.xsessionrc"
 }
 
 disable_root_xrdp_login() {

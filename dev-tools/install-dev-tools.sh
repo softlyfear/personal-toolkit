@@ -155,13 +155,7 @@ fi
 
 selected=()
 case "${1:---all}" in
-  "")
-    selected=("${TOOLS[@]}")
-    ;;
-  --all)
-    selected=("${TOOLS[@]}")
-    ;;
-  all)
+  "" | --all | all)
     selected=("${TOOLS[@]}")
     ;;
   --interactive)

@@ -48,7 +48,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 # --- Step 1: APT ---
 info "APT: update package index"
-$SUDO apt-get update -y
+$SUDO apt-get update
 
 info "APT: full upgrade"
 $SUDO apt-get full-upgrade -y
@@ -78,3 +78,8 @@ else
 fi
 
 ok "System update complete (apt + snap + flatpak)"
+
+# --- Reboot check ---
+if [[ -f /var/run/reboot-required ]]; then
+  warn "REBOOT REQUIRED — run: sudo reboot"
+fi

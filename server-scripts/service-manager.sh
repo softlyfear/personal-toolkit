@@ -89,7 +89,6 @@ targets=()
 if [[ "${1:-}" == "all" ]]; then
   targets=("${ALLOWED_SERVICES[@]}")
 else
-  raw=""
   for raw in "$@"; do
     svc="$(normalize_service "$raw")"
     if ! is_allowed "$svc"; then
@@ -104,7 +103,6 @@ if [[ "$(id -u)" -ne 0 ]]; then
   SUDO="sudo"
 fi
 
-svc=""
 for svc in "${targets[@]}"; do
   info "$action $svc"
   if [[ "$action" == "status" ]]; then
