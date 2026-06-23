@@ -38,6 +38,9 @@ err()   { echo -e "\033[31m[ERROR] $1\033[0m" >&2; exit 1; }
 
 SUDO=""
 if [[ "$(id -u)" -ne 0 ]]; then
+  if ! command -v sudo >/dev/null 2>&1; then
+    err "sudo is required when running as non-root user"
+  fi
   SUDO="sudo"
 fi
 
@@ -48,7 +51,7 @@ fi
 
 # --- Step 1: system packages ---
 info "Updating system packages..."
-$SUDO apt-get update -y
+$SUDO apt-get update
 $SUDO apt-get upgrade -y
 
 info "Installing build dependencies..."

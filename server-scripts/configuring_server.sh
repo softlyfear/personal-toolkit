@@ -20,6 +20,7 @@ set -euo pipefail
 # =============================================================================
 
 readonly DEFAULT_SSH_PORT=2244
+readonly PROVIDER_DEFAULT_USER="user"
 
 readonly SSHD_MAIN="/etc/ssh/sshd_config"
 readonly SSHD_DROPIN_DIR="/etc/ssh/sshd_config.d"
@@ -63,8 +64,8 @@ warn()  { echo -e "\033[33m[WARN]  $1\033[0m" >&2; }
 err()   { echo -e "\033[31m[ERROR] $1\033[0m" >&2; exit 1; }
 sep()   { echo -e "\033[35m-----------------------------------------------------------------\033[0m" >&2; }
 
-C_R='\033[0m'; C_B='\033[1m'; C_D='\033[2m'
-C_G='\033[32m'; C_C='\033[36m'; C_M='\033[35m'; C_Y='\033[33m'; C_BL='\033[34m'
+readonly C_R='\033[0m' C_B='\033[1m' C_D='\033[2m'
+readonly C_G='\033[32m' C_C='\033[36m' C_M='\033[35m' C_Y='\033[33m' C_BL='\033[34m'
 
 sum_line()  { echo -e "  ${C_G}✔${C_R}  $1"; }
 sum_item()  { echo -e "  ${C_G}✔${C_R}  ${C_B}$1${C_R}${2:+ ${C_D}— $2${C_R}}"; }
@@ -193,10 +194,14 @@ prompt_yes_no() {
       info "[y/N] (default: no — Enter or Space)"
     fi
     read_tty input
-    input="$(echo "$input" | tr -d '[:space:]')"
+    input="${input//[[:space:]]/}"
 
     if [[ -z "$input" ]]; then
-      _result=$([[ "$default_yes" == "true" ]] && echo true || echo false)
+      if [[ "$default_yes" == "true" ]]; then
+        _result=true
+      else
+        _result=false
+      fi
       return 0
     fi
 
@@ -654,6 +659,34 @@ trap rollback_on_failure EXIT
 # Sudo user: creation, password, authorized_keys
 # =============================================================================
 
+remove_provider_default_user() {
+  local stale_user="$PROVIDER_DEFAULT_USER"
+
+  if [[ "$SSH_USER" == "$stale_user" ]]; then
+    info "Target user is '$stale_user' — skipping provider default cleanup"
+    return 0
+  fi
+
+  if ! id "$stale_user" &>/dev/null; then
+    return 0
+  fi
+
+  if [[ "$(whoami)" == "$stale_user" ]]; then
+    err "Cannot remove '$stale_user' while logged in as that user — run as root"
+  fi
+
+  if [[ "$(id -u "$stale_user")" -eq 0 ]]; then
+    err "Refusing to remove uid 0 account '$stale_user'"
+  fi
+
+  warn "Removing provider default user '$stale_user' (target user: $SSH_USER)..."
+  pkill -u "$stale_user" 2>/dev/null || true
+  sleep 1
+  rm -f "/etc/sudoers.d/${stale_user}"
+  userdel -rf "$stale_user" || err "Failed to remove user '$stale_user'"
+  ok "Removed provider default user '$stale_user'"
+}
+
 ensure_sudo_user() {
   if id "$SSH_USER" &>/dev/null; then
     warn "User $SSH_USER already exists"
@@ -883,6 +916,7 @@ harden_ssh_stack() {
   if [[ "$USE_SSH_KEY_AUTH" == "true" ]]; then
     info "Setting up sudo user with SSH key authentication..."
     prompt_sudo_username
+    remove_provider_default_user
     ensure_sudo_user
     configure_sudo_access key
     setup_ssh_authorized_key
@@ -890,6 +924,7 @@ harden_ssh_stack() {
   else
     info "Setting up sudo user with password-only SSH..."
     prompt_sudo_username
+    remove_provider_default_user
     ensure_sudo_user
     configure_sudo_access password
   fi
@@ -937,7 +972,7 @@ enable_time_sync() {
   fi
 
   local ntp_synced=false
-  for _ in $(seq 1 15); do
+  for _ in {1..15}; do
     if [[ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" == "yes" ]]; then
       ntp_synced=true
       break
@@ -973,7 +1008,7 @@ ufw_limit_port_once() {
 
 ensure_root_only_allow() {
   local file="$1"
-  [[ -f "$file" && "$(cat "$file")" == "root" ]] && return 0
+  [[ -f "$file" && "$(<"$file")" == "root" ]] && return 0
   echo "root" > "$file"
   chmod 600 "$file"
 }
