@@ -96,12 +96,11 @@ install_git() {
 
 install_uv() {
   info "Installing uv..."
-  curl -fsSL https://astral.sh/uv/install.sh | sh
-  if [[ -f "$HOME/.local/bin/env" ]]; then
-    # shellcheck disable=SC1091
-    source "$HOME/.local/bin/env"
+  apt_install pipx python3-venv
+  if command -v pipx >/dev/null 2>&1; then
+    pipx install --force uv || pipx upgrade uv
   else
-    warn "uv env file not found at \$HOME/.local/bin/env"
+    err "pipx was not installed correctly"
   fi
   ok "uv installed"
 }
@@ -189,9 +188,9 @@ for tool in "${selected[@]}"; do
   esac
 done
 
-if [[ " ${selected[*]} " == *" uv "* && -f "$HOME/.local/bin/env" ]]; then
+if [[ " ${selected[*]} " == *" uv "* ]]; then
   printf '\n'
-  warn "USE: source \$HOME/.local/bin/env"
+  warn "Ensure ~/.local/bin is in PATH"
   printf '\n'
 fi
 
