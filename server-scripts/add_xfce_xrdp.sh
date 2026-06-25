@@ -48,6 +48,13 @@ prompt_new_user() {
   [[ -n "$NEW_USER" ]] || err "Username cannot be empty"
 }
 
+prompt_rdp_source_ip() {
+  echo ""
+  info "Optional: restrict RDP access to a single source IP (recommended)."
+  info "Enter trusted IPv4 (example: 203.0.113.10) or leave empty for open access:"
+  read -r RDP_SOURCE_IP < /dev/tty
+}
+
 configure_xfce_session() {
   local user_home="/home/${NEW_USER}"
 
@@ -109,6 +116,16 @@ ok "Root xrdp login disabled"
 # --- Step 6: firewall ---
 info "Configuring UFW (RDP port ${RDP_PORT}/tcp)..."
 $SUDO apt-get install -y ufw
-$SUDO ufw allow "${RDP_PORT}/tcp"
+prompt_rdp_source_ip
+if [[ -n "${RDP_SOURCE_IP:-}" ]]; then
+  if [[ ! "$RDP_SOURCE_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    err "Invalid IPv4 address for RDP restriction: $RDP_SOURCE_IP"
+  fi
+  $SUDO ufw allow from "$RDP_SOURCE_IP" to any port "${RDP_PORT}" proto tcp
+  ok "UFW rule added: ${RDP_SOURCE_IP} -> ${RDP_PORT}/tcp"
+else
+  $SUDO ufw allow "${RDP_PORT}/tcp"
+  warn "RDP is open to all sources on ${RDP_PORT}/tcp"
+fi
 $SUDO ufw --force enable
 ok "UFW enabled — connect via RDP port ${RDP_PORT}"

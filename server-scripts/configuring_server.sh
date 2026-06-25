@@ -247,11 +247,24 @@ prompt_sudo_username() {
   err "Invalid username after $max_attempts attempts"
 }
 
-generate_hex8_password() {
+validate_password_strength() {
+  local pass="$1"
+
+  # Basic policy: 12+ chars, upper/lower/digit/special.
+  [[ ${#pass} -ge 12 ]] || return 1
+  [[ "$pass" =~ [[:upper:]] ]] || return 1
+  [[ "$pass" =~ [[:lower:]] ]] || return 1
+  [[ "$pass" =~ [[:digit:]] ]] || return 1
+  [[ "$pass" =~ [^[:alnum:]] ]] || return 1
+  return 0
+}
+
+generate_secure_password() {
   if command -v openssl >/dev/null 2>&1; then
-    openssl rand -hex 4
+    # 18 random bytes in base64 gives strong entropy and a shell-friendly string.
+    openssl rand -base64 18 | tr -d '\n'
   else
-    { LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom || true; } | head -c 8
+    { LC_ALL=C tr -dc 'A-Za-z0-9!@#$%^&*()_+~=' < /dev/urandom || true; } | head -c 20
   fi
 }
 
@@ -261,6 +274,9 @@ set_user_password() {
 
   printf '%s:%s' "$user" "$pass" | chpasswd || err "Failed to set password for $user"
   SSH_USER_PASSWORD="$pass"
+  if ! validate_password_strength "$pass"; then
+    warn "Weak password for $user (allowed). Recommendation: 12+ chars with upper/lower/digit/special"
+  fi
 }
 
 prompt_set_password() {
@@ -306,14 +322,14 @@ setup_user_password() {
     return 0
   fi
 
-  prompt_yes_no GENERATE_PASSWORD "Generate secure password (hex8)?" true
+  prompt_yes_no GENERATE_PASSWORD "Generate secure password automatically?" true
 
   if [[ "$GENERATE_PASSWORD" == "true" ]]; then
     local pass=""
-    pass="$(generate_hex8_password)"
-    [[ ${#pass} -eq 8 ]] || err "Failed to generate password for $user"
+    pass="$(generate_secure_password)"
+    validate_password_strength "$pass" || err "Failed to generate strong password for $user"
     set_user_password "$user" "$pass"
-    ok "Password set for $user (auto-generated hex8 — shown once in summary)"
+    ok "Password set for $user (auto-generated strong password — shown once in summary)"
     return 0
   fi
 
@@ -339,8 +355,8 @@ Options:
 Examples:
   $(basename "$0")
   $(basename "$0") 2255
-  $(basename "$0") --user softly --password 'MySecret123'
-  $(basename "$0") 2255 -u admin -p a3f9c2e1
+  $(basename "$0") --user softly --password 'MySecret123!'
+  $(basename "$0") 2255 -u admin -p 'StrongP@ssw0rd!'
 EOF
 }
 
@@ -672,19 +688,53 @@ remove_provider_default_user() {
   fi
 
   if [[ "$(whoami)" == "$stale_user" ]]; then
-    err "Cannot remove '$stale_user' while logged in as that user — run as root"
+    warn "Cannot remove '$stale_user' while logged in as that user — run as root"
+    return 1
   fi
 
   if [[ "$(id -u "$stale_user")" -eq 0 ]]; then
-    err "Refusing to remove uid 0 account '$stale_user'"
+    warn "Refusing to remove uid 0 account '$stale_user'"
+    return 1
   fi
 
   warn "Removing provider default user '$stale_user' (target user: $SSH_USER)..."
   pkill -u "$stale_user" 2>/dev/null || true
   sleep 1
   rm -f "/etc/sudoers.d/${stale_user}"
-  userdel -rf "$stale_user" || err "Failed to remove user '$stale_user'"
+  userdel -rf "$stale_user" || {
+    warn "Failed to remove user '$stale_user'"
+    return 1
+  }
   ok "Removed provider default user '$stale_user'"
+}
+
+clear_history_file_for_user() {
+  local user="$1"
+  local hist_file=""
+  local user_home=""
+
+  user_home="$(getent passwd "$user" | cut -d: -f6)"
+  [[ -n "$user_home" ]] || return 0
+  hist_file="${user_home}/.bash_history"
+
+  if [[ -f "$hist_file" ]]; then
+    : > "$hist_file"
+    chown "$user:$user" "$hist_file" 2>/dev/null || true
+    chmod 600 "$hist_file" 2>/dev/null || true
+  fi
+}
+
+clear_password_cli_history() {
+  # Best-effort cleanup when --password was used.
+  # Note: parent shell in-memory history cannot be fully controlled from this script.
+  [[ -n "$CLI_PRESET_PASSWORD" ]] || return 0
+
+  warn "Clearing shell history files because --password was used (best-effort)..."
+  clear_history_file_for_user root
+
+  if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+    clear_history_file_for_user "$SUDO_USER"
+  fi
 }
 
 ensure_sudo_user() {
@@ -917,7 +967,6 @@ harden_ssh_stack() {
   if [[ "$USE_SSH_KEY_AUTH" == "true" ]]; then
     info "Setting up sudo user with SSH key authentication..."
     prompt_sudo_username
-    remove_provider_default_user
     ensure_sudo_user
     configure_sudo_access key
     setup_ssh_authorized_key
@@ -925,7 +974,6 @@ harden_ssh_stack() {
   else
     info "Setting up sudo user with password-only SSH..."
     prompt_sudo_username
-    remove_provider_default_user
     ensure_sudo_user
     configure_sudo_access password
   fi
@@ -1185,6 +1233,13 @@ info "Restricting cron and at to root only..."
 ensure_root_only_allow /etc/cron.allow
 ensure_root_only_allow /etc/at.allow
 ok "cron/at restricted"
+
+# Final cleanup: run only after all hardening steps succeeded.
+if ! remove_provider_default_user; then
+  warn "Provider default user cleanup skipped/failed"
+fi
+
+clear_password_cli_history
 
 SCRIPT_SUCCEEDED=true
 print_final_summary

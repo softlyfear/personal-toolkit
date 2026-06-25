@@ -48,11 +48,11 @@ Default port `2244/tcp` · custom port · optional flags:
 
 ```bash
 bash <(curl -fsSL .../configuring_server.sh) 2255
-bash <(curl -fsSL .../configuring_server.sh) --user softly --password 'MySecret123'
-bash <(curl -fsSL .../configuring_server.sh) -u admin -p a3f9c2e1
+bash <(curl -fsSL .../configuring_server.sh) --user softly --password 'MySecret123!'
+bash <(curl -fsSL .../configuring_server.sh) -u admin -p 'StrongP@ssw0rd!'
 ```
 
-Without flags: username prompt · password step asks **generate hex8?** (default yes) or manual entry · credentials in summary
+Without flags: username prompt · password step asks **generate secure password?** (default yes) or manual entry · credentials in summary
 
 <details>
 <summary><strong>All flags</strong></summary>
@@ -168,6 +168,7 @@ make help
 ## Remote Desktop (xrdp)
 
 GNOME or XFCE + new sudo user · RDP port `3389`.
+During setup you can optionally restrict RDP access to a trusted source IP.
 
 ```bash
 # GNOME

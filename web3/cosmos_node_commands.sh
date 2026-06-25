@@ -26,7 +26,13 @@ token=""
 
 # Add auto-source hook to bash profile on login
 add() {
-  echo "source ${addbash}-script.sh" >> .bash_profile
+  local line="source ${addbash}-script.sh"
+  touch .bash_profile
+  if grep -qF "$line" .bash_profile; then
+    echo -e "\033[35mAlready present in .bash_profile\033[97m"
+    return 0
+  fi
+  echo "$line" >> .bash_profile
 }
 
 # Delegate tokens to own validator

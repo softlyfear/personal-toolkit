@@ -18,8 +18,14 @@ readonly GETH_VERSION="1.15.11-36b2371c"
 readonly GETH_ARCHIVE="geth-linux-amd64-${GETH_VERSION}.tar.gz"
 readonly GETH_URL="https://gethstore.blob.core.windows.net/builds/${GETH_ARCHIVE}"
 readonly JWT_SECRET="/var/lib/secrets/jwt.hex"
-readonly GETH_DATA="${HOME}/geth/data"
-readonly BEACON_HOME="${HOME}/beacon"
+readonly NODE_USER="ethnode"
+readonly NODE_GROUP="ethnode"
+readonly NODE_HOME="/var/lib/ethnode"
+readonly GETH_DATA="${NODE_HOME}/geth/data"
+readonly BEACON_HOME="${NODE_HOME}/beacon"
+readonly PRYSM_SCRIPT_URL="${PRYSM_SCRIPT_URL:-https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh}"
+readonly GETH_ARCHIVE_SHA256="${GETH_ARCHIVE_SHA256:-}"
+readonly PRYSM_SCRIPT_SHA256="${PRYSM_SCRIPT_SHA256:-}"
 
 
 # =============================================================================
@@ -43,6 +49,20 @@ if [[ "$(id -u)" -ne 0 ]]; then
   fi
   SUDO="sudo"
 fi
+
+verify_sha256_if_provided() {
+  local file="$1"
+  local expected="$2"
+  local actual=""
+
+  if [[ -z "$expected" ]]; then
+    warn "No checksum provided for $file; skipping SHA256 verification"
+    return 0
+  fi
+
+  actual="$(sha256sum "$file" | awk '{print $1}')"
+  [[ "$actual" == "$expected" ]] || err "SHA256 mismatch for $file"
+}
 
 
 # =============================================================================
@@ -75,6 +95,7 @@ ok "ethereum package installed"
 # --- Step 3: geth binary ---
 info "Downloading geth ${GETH_VERSION}..."
 wget -q "${GETH_URL}"
+verify_sha256_if_provided "${GETH_ARCHIVE}" "$GETH_ARCHIVE_SHA256"
 tar -xf "${GETH_ARCHIVE}"
 $SUDO mv "geth-linux-amd64-${GETH_VERSION}/geth" /usr/bin/geth
 rm -rf "geth-linux-amd64-${GETH_VERSION}" "${GETH_ARCHIVE}"
@@ -82,12 +103,16 @@ command -v geth >/dev/null || err "geth not found in PATH"
 ok "geth installed: $(geth version | head -1)"
 
 # --- Step 4: data dirs and JWT secret ---
-mkdir -p "${GETH_DATA}"
+$SUDO groupadd --system "$NODE_GROUP" 2>/dev/null || true
+$SUDO useradd --system --gid "$NODE_GROUP" --home-dir "$NODE_HOME" --create-home --shell /usr/sbin/nologin "$NODE_USER" 2>/dev/null || true
+$SUDO install -d -m 750 -o "$NODE_USER" -g "$NODE_GROUP" "${GETH_DATA}"
+$SUDO install -d -m 750 -o "$NODE_USER" -g "$NODE_GROUP" "${BEACON_HOME}/bin" "${BEACON_HOME}/data"
 $SUDO mkdir -p /var/lib/secrets
 if [[ ! -f "${JWT_SECRET}" ]]; then
   openssl rand -hex 32 | tr -d '\n' | $SUDO tee "${JWT_SECRET}" >/dev/null
   $SUDO chmod 600 "${JWT_SECRET}"
 fi
+$SUDO chown "$NODE_USER:$NODE_GROUP" "${JWT_SECRET}"
 ok "Data directories and JWT secret ready"
 
 # --- Step 5: UFW ---
@@ -95,9 +120,6 @@ ok "Data directories and JWT secret ready"
 #   sudo ufw allow from <YOUR_PC_IP> to any port <PORT>
 info "Configuring UFW..."
 $SUDO apt-get install -y ufw
-$SUDO ufw allow 9999/tcp
-$SUDO ufw allow 3500/tcp
-$SUDO ufw allow 4000/tcp
 $SUDO ufw allow 30303/tcp
 $SUDO ufw allow 30303/udp
 $SUDO ufw allow 12000/udp
@@ -118,19 +140,20 @@ Wants=network-online.target
 Type=simple
 Restart=always
 RestartSec=5s
-User=root
-WorkingDirectory=${HOME}/geth
+User=${NODE_USER}
+Group=${NODE_GROUP}
+WorkingDirectory=${NODE_HOME}/geth
 ExecStart=$(command -v geth) \\
   --sepolia \\
   --syncmode snap \\
   --http \\
-  --http.addr "0.0.0.0" \\
+  --http.addr "127.0.0.1" \\
   --http.port 9999 \\
   --authrpc.addr "127.0.0.1" \\
   --authrpc.port 8551 \\
-  --http.api "eth,net,engine,admin" \\
-  --http.corsdomain "*" \\
-  --http.vhosts "*" \\
+  --http.api "eth,net,web3" \\
+  --http.corsdomain "http://localhost" \\
+  --http.vhosts "localhost" \\
   --datadir ${GETH_DATA} \\
   --authrpc.jwtsecret ${JWT_SECRET}
 [Install]
@@ -147,10 +170,10 @@ info "Check geth logs: journalctl -f -n 100 -u geth -o cat"
 
 # --- Step 7: Prysm beacon ---
 info "Installing Prysm beacon..."
-mkdir -p "${BEACON_HOME}/bin" "${BEACON_HOME}/data"
-curl -fsSL https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh \
-  -o "${BEACON_HOME}/bin/prysm.sh"
-chmod +x "${BEACON_HOME}/bin/prysm.sh"
+curl -fsSL "${PRYSM_SCRIPT_URL}" -o "${BEACON_HOME}/bin/prysm.sh"
+verify_sha256_if_provided "${BEACON_HOME}/bin/prysm.sh" "$PRYSM_SCRIPT_SHA256"
+$SUDO chown "$NODE_USER:$NODE_GROUP" "${BEACON_HOME}/bin/prysm.sh"
+$SUDO chmod 750 "${BEACON_HOME}/bin/prysm.sh"
 
 info "Creating beacon.service..."
 $SUDO tee /etc/systemd/system/beacon.service > /dev/null <<EOF
@@ -162,13 +185,14 @@ Wants=network-online.target
 Type=simple
 Restart=always
 RestartSec=5s
-User=root
+User=${NODE_USER}
+Group=${NODE_GROUP}
 ExecStart=${BEACON_HOME}/bin/prysm.sh beacon-chain \\
   --sepolia \\
   --http-modules=beacon,config,node,validator \\
-  --rpc-host=0.0.0.0 \\
+  --rpc-host=127.0.0.1 \\
   --rpc-port=4000 \\
-  --grpc-gateway-host=0.0.0.0 \\
+  --grpc-gateway-host=127.0.0.1 \\
   --grpc-gateway-port=3500 \\
   --datadir ${BEACON_HOME}/data \\
   --execution-endpoint=http://127.0.0.1:8551 \\
