@@ -42,10 +42,61 @@ setup_sudo() {
 }
 
 prompt_new_user() {
-  echo ""
-  info "Enter new sudo username:"
-  read -r NEW_USER < /dev/tty
-  [[ -n "$NEW_USER" ]] || err "Username cannot be empty"
+  local max_attempts=5
+  local attempt=1
+  local raw=""
+
+  while (( attempt <= max_attempts )); do
+    echo ""
+    if (( attempt == 1 )); then
+      info "Enter new sudo username:"
+    else
+      warn "Invalid username. Use a-z, 0-9, _, - (try again $attempt/$max_attempts):"
+    fi
+    read -r raw < /dev/tty
+    raw="$(printf '%s' "$raw" | LC_ALL=C tr -cd '[:alnum:]_-' | tr '[:upper:]' '[:lower:]')"
+    NEW_USER="${raw:-admin}"
+
+    if [[ "$NEW_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+      return 0
+    fi
+    (( attempt++ )) || true
+  done
+
+  err "Invalid username after $max_attempts attempts"
+}
+
+ensure_ssh_ufw_rule() {
+  local ssh_port=""
+
+  if command -v sshd >/dev/null 2>&1; then
+    ssh_port="$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')"
+  fi
+  ssh_port="${ssh_port:-22}"
+
+  if ! $SUDO ufw status numbered 2>/dev/null | grep -qE "^[[:space:]]*\[[[:space:]]*[0-9]+\][[:space:]]+${ssh_port}/tcp"; then
+    $SUDO ufw allow "${ssh_port}/tcp"
+    ok "UFW rule added for SSH port ${ssh_port}/tcp"
+  else
+    info "UFW rule for SSH port ${ssh_port}/tcp already exists"
+  fi
+}
+
+ensure_sudo_user() {
+  local user_home=""
+
+  if id "$NEW_USER" &>/dev/null; then
+    warn "User $NEW_USER already exists — skipping creation"
+  else
+    $SUDO adduser --gecos "" --disabled-password "$NEW_USER"
+    $SUDO passwd "$NEW_USER"
+    ok "User $NEW_USER created"
+  fi
+
+  $SUDO usermod -aG sudo "$NEW_USER"
+  user_home="$(getent passwd "$NEW_USER" | cut -d: -f6)"
+  [[ -n "$user_home" ]] || err "Home directory not found for $NEW_USER"
+  NEW_USER_HOME="$user_home"
 }
 
 prompt_rdp_source_ip() {
@@ -56,7 +107,7 @@ prompt_rdp_source_ip() {
 }
 
 configure_xfce_session() {
-  local user_home="/home/${NEW_USER}"
+  local user_home="${NEW_USER_HOME:-$(getent passwd "$NEW_USER" | cut -d: -f6)}"
 
   printf '%s\n' 'startxfce4' | $SUDO tee "${user_home}/.xsession" > /dev/null
   $SUDO tee "${user_home}/.xsessionrc" > /dev/null <<'EOF'
@@ -101,12 +152,10 @@ ok "xrdp service enabled and started"
 
 # --- Step 4: sudo user ---
 prompt_new_user
-info "Creating user $NEW_USER..."
-$SUDO adduser --gecos "" --disabled-password "$NEW_USER"
-$SUDO passwd "$NEW_USER"
-$SUDO usermod -aG sudo "$NEW_USER"
+info "Configuring user $NEW_USER..."
+ensure_sudo_user
 configure_xfce_session
-ok "User $NEW_USER created with XFCE session"
+ok "User $NEW_USER configured with XFCE session"
 
 # --- Step 5: security ---
 disable_root_xrdp_login
@@ -116,6 +165,7 @@ ok "Root xrdp login disabled"
 # --- Step 6: firewall ---
 info "Configuring UFW (RDP port ${RDP_PORT}/tcp)..."
 $SUDO apt-get install -y ufw
+ensure_ssh_ufw_rule
 prompt_rdp_source_ip
 if [[ -n "${RDP_SOURCE_IP:-}" ]]; then
   if [[ ! "$RDP_SOURCE_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then

@@ -26,7 +26,8 @@ token=""
 
 # Add auto-source hook to bash profile on login
 add() {
-  local line="source ${addbash}-script.sh"
+  local script_path="${BASH_SOURCE[0]:-cosmos_node_commands.sh}"
+  local line="source ${script_path}"
   touch .bash_profile
   if grep -qF "$line" .bash_profile; then
     echo -e "\033[35mAlready present in .bash_profile\033[97m"
@@ -49,7 +50,7 @@ delegate() {
 # Show wallet balance
 balance() {
   "${project}" q bank balances "$("${project}" keys show wallet -a)"
-  echo -e "\033[35mDivide by 1000 for integers\033[97m"
+  echo -e "\033[35mDivide by 1000000 for whole tokens (6 decimal places)\033[97m"
 }
 
 # Follow node logs
@@ -59,8 +60,8 @@ logs() {
 
 # Show sync status and latest block height
 status() {
-  "${project}" status 2>&1 | jq .SyncInfo.catching_up
-  "${project}" status 2>&1 | jq .SyncInfo.latest_block_height
+  "${project}" status 2>&1 | jq -r '.sync_info.catching_up // .SyncInfo.catching_up // empty'
+  "${project}" status 2>&1 | jq -r '.sync_info.latest_block_height // .SyncInfo.latest_block_height // empty'
 }
 
 # Withdraw all staking rewards
