@@ -1,4 +1,4 @@
-.PHONY: help install update run test test-v test-cov test-watch clean fmt type check docker-build docker-up docker-down docker-logs migrate migrate-create db-upgrade db-downgrade pre-commit
+.PHONY: help install update run test test-v test-cov test-watch clean fmt type check docker-build docker-up docker-down docker-logs docker-restart migrate migrate-create db-upgrade db-downgrade pre-commit clean-all
 
 PROJECT_NAME := <PROJECT_NAME>
 RED    := \033[0;31m
@@ -110,7 +110,7 @@ db-downgrade:
 	uv run python -m alembic downgrade -1
 
 docker-build:
-	docker build -t web-shop-fastapi .
+	docker build -t $(PROJECT_NAME) .
 
 docker-up:
 	docker compose up -d

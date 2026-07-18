@@ -17,6 +17,7 @@ set -euo pipefail
 readonly GETH_VERSION="1.15.11-36b2371c"
 readonly GETH_ARCHIVE="geth-linux-amd64-${GETH_VERSION}.tar.gz"
 readonly GETH_URL="https://gethstore.blob.core.windows.net/builds/${GETH_ARCHIVE}"
+readonly GETH_BIN="/usr/local/bin/geth"
 readonly JWT_SECRET="/var/lib/secrets/jwt.hex"
 readonly NODE_USER="ethnode"
 readonly NODE_GROUP="ethnode"
@@ -85,24 +86,18 @@ $SUDO apt-get dist-upgrade -y
 $SUDO apt-get autoremove -y
 ok "System packages ready"
 
-# --- Step 2: ethereum PPA (legacy tooling) ---
-info "Installing ethereum package from PPA..."
-$SUDO add-apt-repository -y ppa:ethereum/ethereum
-$SUDO apt-get update
-$SUDO apt-get install -y ethereum
-ok "ethereum package installed"
-
-# --- Step 3: geth binary ---
+# --- Step 2: geth binary (pinned version in /usr/local/bin) ---
 info "Downloading geth ${GETH_VERSION}..."
-wget -q "${GETH_URL}"
-verify_sha256_if_provided "${GETH_ARCHIVE}" "$GETH_ARCHIVE_SHA256"
-tar -xf "${GETH_ARCHIVE}"
-$SUDO mv "geth-linux-amd64-${GETH_VERSION}/geth" /usr/bin/geth
-rm -rf "geth-linux-amd64-${GETH_VERSION}" "${GETH_ARCHIVE}"
-command -v geth >/dev/null || err "geth not found in PATH"
-ok "geth installed: $(geth version | head -1)"
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+wget -q "${GETH_URL}" -O "${tmpdir}/${GETH_ARCHIVE}"
+verify_sha256_if_provided "${tmpdir}/${GETH_ARCHIVE}" "$GETH_ARCHIVE_SHA256"
+tar -xf "${tmpdir}/${GETH_ARCHIVE}" -C "$tmpdir"
+$SUDO install -m 755 "${tmpdir}/geth-linux-amd64-${GETH_VERSION}/geth" "$GETH_BIN"
+command -v "$GETH_BIN" >/dev/null || err "geth not found at $GETH_BIN"
+ok "geth installed: $($GETH_BIN version | head -1)"
 
-# --- Step 4: data dirs and JWT secret ---
+# --- Step 3: data dirs and JWT secret ---
 $SUDO groupadd --system "$NODE_GROUP" 2>/dev/null || true
 $SUDO useradd --system --gid "$NODE_GROUP" --home-dir "$NODE_HOME" --create-home --shell /usr/sbin/nologin "$NODE_USER" 2>/dev/null || true
 $SUDO install -d -m 750 -o "$NODE_USER" -g "$NODE_GROUP" "${GETH_DATA}"
@@ -120,11 +115,16 @@ ok "Data directories and JWT secret ready"
 #   sudo ufw allow from <YOUR_PC_IP> to any port <PORT>
 info "Configuring UFW..."
 $SUDO apt-get install -y ufw
+ssh_port="22"
+if command -v sshd >/dev/null 2>&1; then
+  ssh_port="$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')"
+fi
+ssh_port="${ssh_port:-22}"
 $SUDO ufw allow 30303/tcp
 $SUDO ufw allow 30303/udp
 $SUDO ufw allow 12000/udp
 $SUDO ufw allow 13000/tcp
-$SUDO ufw allow 22/tcp
+$SUDO ufw allow "${ssh_port}/tcp"
 $SUDO ufw allow 443/tcp
 $SUDO ufw --force enable
 ok "UFW enabled"
@@ -143,7 +143,7 @@ RestartSec=5s
 User=${NODE_USER}
 Group=${NODE_GROUP}
 WorkingDirectory=${NODE_HOME}/geth
-ExecStart=$(command -v geth) \\
+ExecStart=${GETH_BIN} \\
   --sepolia \\
   --syncmode snap \\
   --http \\

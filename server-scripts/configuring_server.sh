@@ -21,14 +21,16 @@ set -euo pipefail
 
 readonly DEFAULT_SSH_PORT=2244
 readonly PROVIDER_DEFAULT_USER="user"
+readonly SCRIPT_RAW_URL="https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/configuring_server.sh"
 
 readonly SSHD_MAIN="/etc/ssh/sshd_config"
 readonly SSHD_DROPIN_DIR="/etc/ssh/sshd_config.d"
-readonly SSHD_DROPIN_FILE="${SSHD_DROPIN_DIR}/99-hardening.conf"
+# Имя с префиксом 00- обязательно: sshd применяет ПЕРВОЕ встреченное значение,
+# а drop-in'ы читаются в лексикографическом порядке — 00- побеждает 50-cloud-init.conf
+readonly SSHD_DROPIN_FILE="${SSHD_DROPIN_DIR}/00-hardening.conf"
 
-# Allowed SSH key types (ed25519/ecdsa; rsa disabled)
-readonly SSH_KEY_TYPE='ssh-(ecdsa|ed25519)|ecdsa-[a-zA-Z0-9]+'
-readonly SSH_KEY_PATTERN="^(${SSH_KEY_TYPE}) "
+# Разрешённые типы ключей: только реально существующие ed25519/ecdsa-sha2-nistp*
+readonly SSH_KEY_TYPE='ssh-ed25519|ecdsa-sha2-nistp(256|384|521)'
 readonly SSH_KEY_PATTERN_FILE="(^|[[:space:],\"])(${SSH_KEY_TYPE}) "
 
 
@@ -164,7 +166,7 @@ print_final_summary() {
 
 read_tty() {
   if [[ ! -r /dev/tty ]]; then
-    err "Interactive input requires a TTY. Download first: curl -fsSL URL -o /tmp/setup.sh && bash /tmp/setup.sh"
+    err "Interactive input requires a TTY. Download first: curl -fsSL ${SCRIPT_RAW_URL} -o /tmp/setup.sh && bash /tmp/setup.sh"
   fi
   IFS= read -r "$1" < /dev/tty
 }
@@ -260,12 +262,20 @@ validate_password_strength() {
 }
 
 generate_secure_password() {
+  local pass="" random_part=""
+
+  # hex даёт lowercase + цифры; суффикс Aa1! гарантирует upper/lower/digit/special
   if command -v openssl >/dev/null 2>&1; then
-    # 18 random bytes in base64 gives strong entropy and a shell-friendly string.
-    openssl rand -base64 18 | tr -d '\n'
+    random_part="$(openssl rand -hex 12)"
   else
-    { LC_ALL=C tr -dc 'A-Za-z0-9!@#$%^&*()_+~=' < /dev/urandom || true; } | head -c 20
+    random_part="$({ LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom || true; } | head -c 24)"
   fi
+  [[ -n "$random_part" ]] || return 1
+
+  pass="${random_part}Aa1!"
+  validate_password_strength "$pass" || return 1
+  printf '%s' "$pass"
+  return 0
 }
 
 set_user_password() {
@@ -286,7 +296,7 @@ prompt_set_password() {
   local attempt=1
 
   if [[ ! -r /dev/tty ]]; then
-    err "Password input requires a TTY. Download first: curl -fsSL URL -o /tmp/setup.sh && bash /tmp/setup.sh"
+    err "Password input requires a TTY. Download first: curl -fsSL ${SCRIPT_RAW_URL} -o /tmp/setup.sh && bash /tmp/setup.sh"
   fi
 
   while (( attempt <= max_attempts )); do
@@ -326,8 +336,7 @@ setup_user_password() {
 
   if [[ "$GENERATE_PASSWORD" == "true" ]]; then
     local pass=""
-    pass="$(generate_secure_password)"
-    validate_password_strength "$pass" || err "Failed to generate strong password for $user"
+    pass="$(generate_secure_password)" || err "Failed to generate strong password for $user"
     set_user_password "$user" "$pass"
     ok "Password set for $user (auto-generated strong password — shown once in summary)"
     return 0
@@ -442,7 +451,7 @@ validate_ssh_pubkey() {
 
   key_type="${key%% *}"
   case "$key_type" in
-    ssh-ed25519|ssh-ecdsa|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521) ;;
+    ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521) ;;
     ssh-rsa) err "ssh-rsa is not supported. Generate a new key: ssh-keygen -t ed25519" ;;
     *) err "Unsupported key type '${key_type}'. Use ed25519 or ecdsa (paste: cat ~/.ssh/id_ed25519.pub)" ;;
   esac
@@ -799,19 +808,28 @@ configure_sudo_access() {
 
 remove_legacy_rsa_keys() {
   local ak="${SSH_USER_HOME}/.ssh/authorized_keys"
+  local tmp_file=""
 
-  if [[ -f "$ak" ]] && grep -qE '(^|[[:space:]]*)ssh-rsa ' "$ak"; then
-    warn "Removing legacy ssh-rsa keys from $ak (rsa is disabled)"
-    grep -vE '(^|[[:space:]]*)ssh-rsa ' "$ak" > "${ak}.tmp"
-    mv "${ak}.tmp" "$ak"
-    chmod 600 "$ak"
-    chown "$SSH_USER:$SSH_USER" "$ak"
+  if [[ ! -f "$ak" ]] || ! grep -qE '(^|[[:space:]]*)ssh-rsa ' "$ak"; then
+    return 0
   fi
+
+  warn "Removing legacy ssh-rsa keys from $ak (rsa is disabled)"
+  tmp_file="$(mktemp)"
+  chmod 600 "$tmp_file"
+  grep -vE '(^|[[:space:]]*)ssh-rsa ' "$ak" > "$tmp_file" || true
+  if [[ ! -s "$tmp_file" ]]; then
+    rm -f "$tmp_file"
+    err "No non-RSA keys remain in $ak after removing ssh-rsa"
+  fi
+  mv "$tmp_file" "$ak"
+  chmod 600 "$ak"
+  chown "$SSH_USER:$SSH_USER" "$ak"
 }
 
 setup_ssh_authorized_key() {
   local ak="${SSH_USER_HOME}/.ssh/authorized_keys"
-  local sshkey=""
+  local sshkey="" sshkey_input=""
 
   mkdir -p "${SSH_USER_HOME}/.ssh"
   chmod 700 "${SSH_USER_HOME}/.ssh"
@@ -871,12 +889,14 @@ backup_sshd_config() {
 apply_sshd_hardening() {
   local -a auth_lines=()
   backup_sshd_config
+  # Удаляем устаревший drop-in (99-) и cloud-init-переопределения при повторном запуске
+  rm -f "${SSHD_DROPIN_DIR}/99-hardening.conf"
 
   if [[ "$USE_SSH_KEY_AUTH" == "true" ]]; then
     auth_lines=(
       "AuthenticationMethods publickey"
       "PubkeyAuthentication yes"
-      "PubkeyAcceptedAlgorithms -ssh-rsa"
+      "PubkeyAcceptedAlgorithms -ssh-rsa,rsa-sha2-256,rsa-sha2-512"
       "PasswordAuthentication no"
     )
   else
@@ -927,6 +947,9 @@ EOF
   local sshd_runtime_cfg=""
   sshd_runtime_cfg="$(get_sshd_runtime_config)"
 
+  grep -qE '^permitrootlogin[[:space:]]+no$' <<< "$sshd_runtime_cfg" \
+    || err "sshd effective PermitRootLogin is not 'no' (overridden by another config?)"
+
   if [[ "$USE_SSH_KEY_AUTH" == "true" ]]; then
     grep -qE '^authenticationmethods[[:space:]]+publickey$' <<< "$sshd_runtime_cfg" \
       || err "sshd effective auth is not key-only (expected: publickey)"
@@ -936,6 +959,7 @@ EOF
       || err "sshd effective auth is not password-only (expected: password)"
     ok "SSH auth locked to password only"
   fi
+  ok "PermitRootLogin=no verified via sshd -T"
 }
 
 verify_sshd_port() {
@@ -1044,10 +1068,31 @@ backup_fail2ban_config() {
   fi
 }
 
+ufw_prune_stale_ssh_limit_rules() {
+  local current_port="$1"
+  local rule_line="" rule_num="" port=""
+  local found=true
+
+  while [[ "$found" == "true" ]]; do
+    found=false
+    while IFS= read -r rule_line; do
+      [[ "$rule_line" =~ ^[[:space:]]*\[[[:space:]]*([0-9]+)\][[:space:]]+([0-9]+)/tcp[[:space:]]+LIMIT ]] || continue
+      rule_num="${BASH_REMATCH[1]}"
+      port="${BASH_REMATCH[2]}"
+      if [[ "$port" != "$current_port" ]]; then
+        ufw --force delete "$rule_num" >/dev/null 2>&1 || true
+        warn "Removed stale UFW limit rule for port ${port}/tcp"
+        found=true
+        break
+      fi
+    done < <(ufw status numbered 2>/dev/null)
+  done
+}
+
 ufw_limit_port_once() {
   local port_rule="$1"
 
-  if ufw status 2>/dev/null | grep -qF "${port_rule}"; then
+  if ufw status numbered 2>/dev/null | grep -qE "^[[:space:]]*\[[[:space:]]*[0-9]+\][[:space:]]+${port_rule}[[:space:]]+LIMIT"; then
     warn "UFW rule for ${port_rule} already exists — skipping"
     return 1
   fi
@@ -1057,7 +1102,10 @@ ufw_limit_port_once() {
 
 ensure_root_only_allow() {
   local file="$1"
-  [[ -f "$file" && "$(<"$file")" == "root" ]] && return 0
+  if [[ -f "$file" && "$(<"$file")" == "root" ]]; then
+    chmod 600 "$file"
+    return 0
+  fi
   printf 'root\n' > "$file"
   chmod 600 "$file"
 }
@@ -1131,6 +1179,11 @@ ok "Packages installed"
 # --- Step 3: unattended-upgrades and NTP ---
 sep
 info "Configuring unattended-upgrades..."
+cat > /etc/apt/apt.conf.d/20auto-upgrades << 'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::AutocleanInterval "7";
+EOF
 cat > /etc/apt/apt.conf.d/51custom-unattended-upgrades << 'EOF'
 Unattended-Upgrade::Automatic-Reboot "false";
 EOF
@@ -1156,6 +1209,8 @@ fi
 
 ufw default deny incoming
 ufw default allow outgoing
+
+ufw_prune_stale_ssh_limit_rules "$SSH_PORT"
 
 if ufw_limit_port_once "${SSH_PORT}/tcp"; then
   ROLLBACK_UFW_SSH_RULE_ADDED=true
