@@ -41,15 +41,15 @@ my-script/
 **Install**
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/configuring_server.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/configuring_server.sh)
 ```
 
 Default port `2244/tcp` · custom port · optional flags:
 
 ```bash
-bash <(curl -fsSL .../configuring_server.sh) 2255
-bash <(curl -fsSL .../configuring_server.sh) --user softly --password 'MySecret123!'
-bash <(curl -fsSL .../configuring_server.sh) -u admin -p 'StrongP@ssw0rd!'
+bash <(wget -qO- .../configuring_server.sh) 2255
+bash <(wget -qO- .../configuring_server.sh) --user softly --password 'MySecret123!'
+bash <(wget -qO- .../configuring_server.sh) -u admin -p 'StrongP@ssw0rd!'
 ```
 
 Without flags: username prompt · password step asks **generate secure password?** (default yes) or manual entry · credentials in summary
@@ -97,10 +97,10 @@ sudo -i
 
 ```bash
 # one-time
-bash <(curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/update_system_all.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/update_system_all.sh)
 
 # install global command
-bash <(curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/install_sysupdate.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/install_sysupdate.sh)
 sysupdate
 ```
 
@@ -111,7 +111,7 @@ sysupdate
 `svcctl` — wrapper for `postgresql` and `docker`.
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/install_svcctl.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/install_svcctl.sh)
 
 svcctl status all
 svcctl start postgresql
@@ -128,13 +128,13 @@ Packages: `git` · `uv` · `make` · `docker` · `postgresql`
 
 ```bash
 # all (default)
-bash <(curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/dev-tools/install-dev-tools.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/dev-tools/install-dev-tools.sh)
 
 # selected
-bash <(curl -fsSL .../install-dev-tools.sh) git uv
+bash <(wget -qO- .../install-dev-tools.sh) git uv
 
 # interactive
-bash <(curl -fsSL .../install-dev-tools.sh) --interactive
+bash <(wget -qO- .../install-dev-tools.sh) --interactive
 ```
 
 ---
@@ -172,10 +172,10 @@ During setup you can optionally restrict RDP access to a trusted source IP.
 
 ```bash
 # GNOME
-bash <(curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/add_gnome_xrdp.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/add_gnome_xrdp.sh)
 
 # XFCE (lighter)
-bash <(curl -fsSL https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/add_xfce_xrdp.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/add_xfce_xrdp.sh)
 ```
 
 ---

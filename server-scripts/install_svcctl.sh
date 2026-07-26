@@ -3,7 +3,7 @@
 # install_svcctl.sh — install svcctl wrapper to /usr/local/bin
 #
 # Usage:  bash install_svcctl.sh
-# Requires: curl; root or sudo
+# Requires: wget; root or sudo
 #
 set -euo pipefail
 
@@ -29,8 +29,8 @@ err()   { echo -e "\033[31m[ERROR] $1\033[0m" >&2; exit 1; }
 # MAIN
 # =============================================================================
 
-if ! command -v curl >/dev/null 2>&1; then
-  err "curl is required"
+if ! command -v wget >/dev/null 2>&1; then
+  err "wget is required"
 fi
 
 SUDO=""
@@ -42,7 +42,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 
 info "Installing svcctl to ${BIN_DIR}..."
-$SUDO curl -fsSL "${BASE_URL}/service-manager.sh" -o "${BIN_DIR}/svcctl"
+$SUDO wget -qO "${BIN_DIR}/svcctl" "${BASE_URL}/service-manager.sh"
 $SUDO chmod +x "${BIN_DIR}/svcctl"
 
 ok "Command installed: svcctl"
