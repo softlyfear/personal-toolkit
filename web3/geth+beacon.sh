@@ -170,7 +170,7 @@ info "Check geth logs: journalctl -f -n 100 -u geth -o cat"
 
 # --- Step 7: Prysm beacon ---
 info "Installing Prysm beacon..."
-curl -fsSL "${PRYSM_SCRIPT_URL}" -o "${BEACON_HOME}/bin/prysm.sh"
+wget -qO "${BEACON_HOME}/bin/prysm.sh" "${PRYSM_SCRIPT_URL}"
 verify_sha256_if_provided "${BEACON_HOME}/bin/prysm.sh" "$PRYSM_SCRIPT_SHA256"
 $SUDO chown "$NODE_USER:$NODE_GROUP" "${BEACON_HOME}/bin/prysm.sh"
 $SUDO chmod 750 "${BEACON_HOME}/bin/prysm.sh"

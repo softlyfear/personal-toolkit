@@ -96,12 +96,10 @@ install_git() {
 
 install_uv() {
   info "Installing uv..."
-  apt_install pipx python3-venv
-  if command -v pipx >/dev/null 2>&1; then
-    pipx install --force uv || pipx upgrade uv
-  else
-    err "pipx was not installed correctly"
+  if ! need_cmd wget; then
+    err "wget is required"
   fi
+  wget -qO- https://astral.sh/uv/install.sh | sh
   ok "uv installed"
 }
 

@@ -166,7 +166,7 @@ print_final_summary() {
 
 read_tty() {
   if [[ ! -r /dev/tty ]]; then
-    err "Interactive input requires a TTY. Download first: curl -fsSL ${SCRIPT_RAW_URL} -o /tmp/setup.sh && bash /tmp/setup.sh"
+    err "Interactive input requires a TTY. Download first: wget -qO /tmp/setup.sh ${SCRIPT_RAW_URL} && bash /tmp/setup.sh"
   fi
   IFS= read -r "$1" < /dev/tty
 }
@@ -296,7 +296,7 @@ prompt_set_password() {
   local attempt=1
 
   if [[ ! -r /dev/tty ]]; then
-    err "Password input requires a TTY. Download first: curl -fsSL ${SCRIPT_RAW_URL} -o /tmp/setup.sh && bash /tmp/setup.sh"
+    err "Password input requires a TTY. Download first: wget -qO /tmp/setup.sh ${SCRIPT_RAW_URL} && bash /tmp/setup.sh"
   fi
 
   while (( attempt <= max_attempts )); do
