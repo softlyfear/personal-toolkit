@@ -67,12 +67,28 @@ prompt_new_user() {
 }
 
 ensure_ssh_ufw_rule() {
-  local ssh_port=""
+  local ssh_port="${SSH_PORT:-}"
+  local sshd_bin=""
+  local -a connection=()
 
-  if command -v sshd >/dev/null 2>&1; then
-    ssh_port="$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')"
+  if [[ -z "$ssh_port" && -n "${SSH_CONNECTION:-}" ]]; then
+    read -r -a connection <<< "$SSH_CONNECTION"
+    ssh_port="${connection[3]:-}"
   fi
-  ssh_port="${ssh_port:-22}"
+
+  if [[ -z "$ssh_port" ]]; then
+    if command -v sshd >/dev/null 2>&1; then
+      sshd_bin="$(command -v sshd)"
+    elif [[ -x /usr/sbin/sshd ]]; then
+      sshd_bin="/usr/sbin/sshd"
+    fi
+    if [[ -n "$sshd_bin" ]]; then
+      ssh_port="$($SUDO "$sshd_bin" -T 2>/dev/null | awk '/^port /{print $2; exit}')"
+    fi
+  fi
+
+  [[ "$ssh_port" =~ ^[0-9]+$ ]] && (( ssh_port >= 1 && ssh_port <= 65535 )) \
+    || err "Не удалось безопасно определить SSH-порт; задайте его через SSH_PORT"
 
   if ! $SUDO ufw status numbered 2>/dev/null | grep -qE "^[[:space:]]*\[[[:space:]]*[0-9]+\][[:space:]]+${ssh_port}/tcp"; then
     $SUDO ufw allow "${ssh_port}/tcp"
@@ -138,31 +154,7 @@ $SUDO apt-get update
 $SUDO apt-get upgrade -y
 ok "System updated"
 
-# --- Step 2: desktop and xrdp ---
-info "Installing XFCE and xrdp..."
-$SUDO apt-get install -y xfce4 xfce4-goodies xrdp
-ok "XFCE and xrdp installed"
-
-# --- Step 3: xrdp service ---
-info "Configuring xrdp service..."
-$SUDO adduser xrdp ssl-cert
-$SUDO systemctl enable xrdp
-$SUDO systemctl start xrdp
-ok "xrdp service enabled and started"
-
-# --- Step 4: sudo user ---
-prompt_new_user
-info "Configuring user $NEW_USER..."
-ensure_sudo_user
-configure_xfce_session
-ok "User $NEW_USER configured with XFCE session"
-
-# --- Step 5: security ---
-disable_root_xrdp_login
-$SUDO systemctl restart xrdp
-ok "Root xrdp login disabled"
-
-# --- Step 6: firewall ---
+# --- Step 2: firewall before xrdp can start ---
 info "Configuring UFW (RDP port ${RDP_PORT}/tcp)..."
 $SUDO apt-get install -y ufw
 ensure_ssh_ufw_rule
@@ -177,5 +169,30 @@ else
   $SUDO ufw allow "${RDP_PORT}/tcp"
   warn "RDP is open to all sources on ${RDP_PORT}/tcp"
 fi
+printf '%s\n' "⚠️ РИСК: неверное SSH-правило может заблокировать удалённый доступ. Откат: используйте активную SSH-сессию или консоль провайдера и выполните sudo ufw disable." >&2
 $SUDO ufw --force enable
-ok "UFW enabled — connect via RDP port ${RDP_PORT}"
+ok "UFW enabled before xrdp installation"
+
+# --- Step 3: desktop and xrdp ---
+info "Installing XFCE and xrdp..."
+$SUDO apt-get install -y xfce4 xfce4-goodies xrdp
+$SUDO adduser xrdp ssl-cert
+ok "XFCE and xrdp installed"
+
+# --- Step 4: sudo user ---
+prompt_new_user
+info "Configuring user $NEW_USER..."
+ensure_sudo_user
+configure_xfce_session
+ok "User $NEW_USER configured with XFCE session"
+
+# --- Step 5: security ---
+disable_root_xrdp_login
+ok "Root xrdp login disabled"
+
+# --- Step 6: start xrdp only after firewall and security configuration ---
+$SUDO systemctl enable xrdp
+printf '%s\n' "⚠️ РИСК: перезапуск xrdp прервёт активные RDP-сеансы. Откат: подключитесь по SSH и выполните sudo systemctl start xrdp." >&2
+$SUDO systemctl restart xrdp
+$SUDO systemctl is-active --quiet xrdp || err "xrdp не запустился"
+ok "xrdp enabled and active — connect via RDP port ${RDP_PORT}"

@@ -44,7 +44,7 @@ help:
 	@echo ""
 	@echo "$(GREEN)Cleanup:$(NC)"
 	@echo "  clean          — Remove caches"
-	@echo "  clean-all      — Remove caches + venv + volumes"
+	@echo "  clean-all      — Remove caches + venv; keep Docker volumes"
 
 install:
 	@echo "$(GREEN)==> Installing dependencies...$(NC)"
@@ -58,7 +58,7 @@ update:
 run:
 	@if [ -d "alembic" ] || [ -f "alembic.ini" ]; then \
 		echo "$(BLUE)==> Applying migrations...$(NC)"; \
-		uv run python -m alembic upgrade head || echo "$(YELLOW)Migration skipped$(NC)"; \
+		uv run python -m alembic upgrade head; \
 	fi
 	uv run python main.py
 
@@ -69,7 +69,7 @@ fmt:
 
 type:
 	@echo "$(GREEN)==> Type checking...$(NC)"
-	@uv run ty check || echo "$(YELLOW)⚠ Type issues found (non-critical)$(NC)"
+	uv run ty check
 
 check: fmt type
 	@echo "$(GREEN)==> All checks passed!$(NC)"
@@ -93,7 +93,8 @@ test-watch:
 	uv run ptw -- -v --tb=short
 
 migrate:
-	@read -p "Migration message: " msg; \
+	@set -e; \
+	read -p "Migration message: " msg; \
 	if [ -z "$$msg" ]; then echo "$(RED)Empty message$(NC)"; exit 1; fi; \
 	uv run python -m alembic revision --autogenerate -m "$$msg"; \
 	uv run python -m alembic upgrade head
@@ -130,4 +131,5 @@ clean:
 
 clean-all: clean
 	rm -rf .venv
-	docker compose down -v 2>/dev/null || true
+	@printf '%s\n' "⚠️ РИСК: Docker Compose сервисы будут остановлены. Откат: выполните docker compose up -d."
+	docker compose down 2>/dev/null || true

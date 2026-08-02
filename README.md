@@ -167,14 +167,14 @@ make help
 
 ## Remote Desktop (xrdp)
 
-GNOME or XFCE + new sudo user · RDP port `3389`.
+GNOME (**Ubuntu only**) or XFCE (**Ubuntu/Debian**) + new sudo user · RDP port `3389`.
 During setup you can optionally restrict RDP access to a trusted source IP.
 
 ```bash
-# GNOME
+# GNOME — Ubuntu only
 bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/add_gnome_xrdp.sh)
 
-# XFCE (lighter)
+# XFCE — Ubuntu/Debian, lighter
 bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/add_xfce_xrdp.sh)
 ```
 

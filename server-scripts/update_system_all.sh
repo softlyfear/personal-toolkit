@@ -73,12 +73,25 @@ fi
 
 # --- Step 3: Flatpak (optional) ---
 if need_cmd flatpak; then
-  info "Flatpak: updating apps and runtimes"
-  if ! flatpak update -y; then
-    warn "Flatpak user update failed, trying system update with sudo..."
-    $SUDO flatpak update -y
+  flatpak_ok=true
+
+  info "Flatpak: updating user apps and runtimes"
+  if ! flatpak update --user -y; then
+    warn "Flatpak user update failed"
+    flatpak_ok=false
   fi
-  ok "Flatpak updates completed"
+
+  info "Flatpak: updating system apps and runtimes"
+  if ! $SUDO flatpak update --system -y; then
+    warn "Flatpak system update failed"
+    flatpak_ok=false
+  fi
+
+  if [[ "$flatpak_ok" == "true" ]]; then
+    ok "Flatpak user and system updates completed"
+  else
+    warn "Flatpak updates completed with errors"
+  fi
 else
   info "flatpak not found, skipping"
 fi
