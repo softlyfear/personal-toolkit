@@ -17,6 +17,7 @@ set -euo pipefail
 readonly GETH_VERSION="1.15.11-36b2371c"
 readonly GETH_ARCHIVE="geth-linux-amd64-${GETH_VERSION}.tar.gz"
 readonly GETH_URL="https://gethstore.blob.core.windows.net/builds/${GETH_ARCHIVE}"
+readonly GETH_ARCHIVE_SHA256="a14a4285daedf75ea04a7a298e6caa48d566a2786c93fc5e86ec2c5998c92455"
 readonly GETH_BIN="/usr/local/bin/geth"
 readonly JWT_SECRET="/var/lib/secrets/jwt.hex"
 readonly NODE_USER="ethnode"
@@ -24,9 +25,10 @@ readonly NODE_GROUP="ethnode"
 readonly NODE_HOME="/var/lib/ethnode"
 readonly GETH_DATA="${NODE_HOME}/geth/data"
 readonly BEACON_HOME="${NODE_HOME}/beacon"
-readonly PRYSM_SCRIPT_URL="${PRYSM_SCRIPT_URL:-https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh}"
-readonly GETH_ARCHIVE_SHA256="${GETH_ARCHIVE_SHA256:-}"
-readonly PRYSM_SCRIPT_SHA256="${PRYSM_SCRIPT_SHA256:-}"
+readonly PRYSM_VERSION="v7.1.8"
+readonly PRYSM_SCRIPT_COMMIT="ea3fbe48b48170e7f7252fbc15e9591d462a0f87"
+readonly PRYSM_SCRIPT_URL="https://raw.githubusercontent.com/OffchainLabs/prysm/${PRYSM_SCRIPT_COMMIT}/prysm.sh"
+readonly PRYSM_SCRIPT_SHA256="7beb6fc967380d1a82bd88921960c8d02f5321867a05aebf4222a5b600e7dbac"
 
 
 # =============================================================================
@@ -51,18 +53,15 @@ if [[ "$(id -u)" -ne 0 ]]; then
   SUDO="sudo"
 fi
 
-verify_sha256_if_provided() {
+verify_sha256() {
   local file="$1"
   local expected="$2"
   local actual=""
 
-  if [[ -z "$expected" ]]; then
-    warn "No checksum provided for $file; skipping SHA256 verification"
-    return 0
-  fi
-
+  [[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || err "Некорректная ожидаемая SHA256 для $file"
   actual="$(sha256sum "$file" | awk '{print $1}')"
-  [[ "$actual" == "$expected" ]] || err "SHA256 mismatch for $file"
+  [[ "$actual" == "$expected" ]] || err "SHA256 не совпадает для $file"
+  ok "SHA256 проверена: $(basename "$file")"
 }
 
 
@@ -79,10 +78,9 @@ info "Installing build dependencies..."
 $SUDO apt-get install -y coreutils curl iptables build-essential \
   git wget lz4 jq make gcc nano automake autoconf tmux htop \
   nvme-cli libgbm1 pkg-config libssl-dev libleveldb-dev tar \
-  clang bsdmainutils ncdu unzip
+  clang bsdmainutils ncdu unzip gnupg openssl
 
-info "Dist-upgrade and autoremove..."
-$SUDO apt-get dist-upgrade -y
+info "Удаление неиспользуемых пакетов..."
 $SUDO apt-get autoremove -y
 ok "System packages ready"
 
@@ -91,7 +89,7 @@ info "Downloading geth ${GETH_VERSION}..."
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 wget -q "${GETH_URL}" -O "${tmpdir}/${GETH_ARCHIVE}"
-verify_sha256_if_provided "${tmpdir}/${GETH_ARCHIVE}" "$GETH_ARCHIVE_SHA256"
+verify_sha256 "${tmpdir}/${GETH_ARCHIVE}" "$GETH_ARCHIVE_SHA256"
 tar -xf "${tmpdir}/${GETH_ARCHIVE}" -C "$tmpdir"
 $SUDO install -m 755 "${tmpdir}/geth-linux-amd64-${GETH_VERSION}/geth" "$GETH_BIN"
 command -v "$GETH_BIN" >/dev/null || err "geth not found at $GETH_BIN"
@@ -170,10 +168,10 @@ info "Check geth logs: journalctl -f -n 100 -u geth -o cat"
 
 # --- Step 7: Prysm beacon ---
 info "Installing Prysm beacon..."
-wget -qO "${BEACON_HOME}/bin/prysm.sh" "${PRYSM_SCRIPT_URL}"
-verify_sha256_if_provided "${BEACON_HOME}/bin/prysm.sh" "$PRYSM_SCRIPT_SHA256"
-$SUDO chown "$NODE_USER:$NODE_GROUP" "${BEACON_HOME}/bin/prysm.sh"
-$SUDO chmod 750 "${BEACON_HOME}/bin/prysm.sh"
+wget -qO "${tmpdir}/prysm.sh" "${PRYSM_SCRIPT_URL}"
+verify_sha256 "${tmpdir}/prysm.sh" "$PRYSM_SCRIPT_SHA256"
+$SUDO install -m 750 -o "$NODE_USER" -g "$NODE_GROUP" \
+  "${tmpdir}/prysm.sh" "${BEACON_HOME}/bin/prysm.sh"
 
 info "Creating beacon.service..."
 $SUDO tee /etc/systemd/system/beacon.service > /dev/null <<EOF
@@ -187,6 +185,7 @@ Restart=always
 RestartSec=5s
 User=${NODE_USER}
 Group=${NODE_GROUP}
+Environment=USE_PRYSM_VERSION=${PRYSM_VERSION}
 ExecStart=${BEACON_HOME}/bin/prysm.sh beacon-chain \\
   --sepolia \\
   --http-modules=beacon,config,node,validator \\
