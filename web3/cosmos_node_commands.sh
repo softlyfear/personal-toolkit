@@ -6,7 +6,7 @@
 #         source cosmos_node_commands.sh
 #
 # Set project-specific values before sourcing:
-#   addbash, chainid, project, token
+#   addbash, chainid, project, token, decimals, wallet_name
 #
 
 
@@ -18,6 +18,11 @@ addbash="${addbash:-}"
 chainid="${chainid:-}"
 project="${project:-}"
 token="${token:-}"
+# Количество нулей в минимальной деноминации (6 — стандарт для большинства Cosmos SDK
+# чейнов, но не универсально — проверьте decimals вашего форка перед делегированием).
+decimals="${decimals:-6}"
+# Имя ключа в keyring, используемое во всех delegate/rewards/unjail/voting командах.
+wallet_name="${wallet_name:-wallet}"
 
 
 # =============================================================================
@@ -42,6 +47,13 @@ _cosmos_require_command() {
     printf 'Ошибка: команда не найдена: %s\n' "$command_name" >&2
     return 1
   fi
+}
+
+_cosmos_denom_amount() {
+  local quantity="$1"
+  local zeros=""
+  printf -v zeros '%0*d' "$decimals" 0
+  printf '%s' "${quantity}${zeros}${token}"
 }
 
 _cosmos_confirm_transaction() {
@@ -109,13 +121,13 @@ delegate() {
     return 1
   fi
 
-  amount="${quantity}000000${token}"
+  amount="$(_cosmos_denom_amount "$quantity")"
   _cosmos_confirm_transaction "делегирование ${amount}" || return 0
 
   "${project}" tx staking delegate \
-    "$("${project}" keys show wallet --bech val -a)" \
+    "$("${project}" keys show "${wallet_name}" --bech val -a)" \
     "$amount" \
-    --from wallet --chain-id "${chainid}" \
+    --from "${wallet_name}" --chain-id "${chainid}" \
     --gas-prices "0.1${token}" --gas-adjustment 1.5 --gas auto -y
 }
 
@@ -124,8 +136,8 @@ balance() {
   _cosmos_require_vars project || return 1
   _cosmos_require_command "$project" || return 1
 
-  "${project}" q bank balances "$("${project}" keys show wallet -a)"
-  echo -e "\033[35mDivide by 1000000 for whole tokens (6 decimal places)\033[97m"
+  "${project}" q bank balances "$("${project}" keys show "${wallet_name}" -a)"
+  echo -e "\033[35mDivide by 1$(printf '%0*d' "$decimals" 0) for whole tokens (${decimals} decimal places)\033[97m"
 }
 
 # Follow node logs
@@ -157,7 +169,7 @@ rewards() {
   _cosmos_confirm_transaction "вывод всех staking-наград" || return 0
 
   "${project}" tx distribution withdraw-all-rewards \
-    --from wallet --chain-id "${chainid}" \
+    --from "${wallet_name}" --chain-id "${chainid}" \
     --gas-prices "0.1${token}" --gas-adjustment 1.5 --gas auto -y
 }
 
@@ -168,13 +180,28 @@ unjail() {
   _cosmos_confirm_transaction "unjail валидатора" || return 0
 
   "${project}" tx slashing unjail \
-    --from wallet --chain-id "${chainid}" \
+    --from "${wallet_name}" --chain-id "${chainid}" \
     --gas-prices "0.1${token}" --gas-adjustment 1.5 --gas auto -y
 }
 
 # Restart node systemd unit
 restart() {
+  local answer=""
+
   _cosmos_require_vars project || return 1
+
+  printf '%s\n' "⚠️ РИСК: перезапуск остановит участие валидатора в консенсусе на время рестарта (возможен пропуск блоков). Откат: после рестарта нода досинхронизируется автоматически; ручного отката не требуется." >&2
+  printf 'Перезапустить %s? [y/N]: ' "${project}" >&2
+  IFS= read -r answer
+
+  case "${answer,,}" in
+    y | yes | д | да) ;;
+    *)
+      printf 'Перезапуск отменён\n' >&2
+      return 0
+      ;;
+  esac
+
   sudo systemctl restart "${project}"
 }
 
@@ -202,7 +229,7 @@ voting() {
 
   _cosmos_confirm_transaction "голос ${selection} по предложению ${id}" || return 0
   "${project}" tx gov vote "${id}" "${selection}" \
-    --from wallet --chain-id "${chainid}" \
+    --from "${wallet_name}" --chain-id "${chainid}" \
     --gas-prices "0.1${token}" --gas-adjustment 1.5 --gas auto -y
 }
 

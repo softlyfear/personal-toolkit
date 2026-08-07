@@ -80,7 +80,7 @@ $SUDO apt-get install -y coreutils curl iptables build-essential \
   nvme-cli libgbm1 pkg-config libssl-dev libleveldb-dev tar \
   clang bsdmainutils ncdu unzip gnupg openssl
 
-info "Удаление неиспользуемых пакетов..."
+info "Removing unused packages..."
 $SUDO apt-get autoremove -y
 ok "System packages ready"
 
@@ -108,7 +108,7 @@ fi
 $SUDO chown "$NODE_USER:$NODE_GROUP" "${JWT_SECRET}"
 ok "Data directories and JWT secret ready"
 
-# --- Step 5: UFW ---
+# --- Step 4: UFW ---
 # Restrict by source IP for better security:
 #   sudo ufw allow from <YOUR_PC_IP> to any port <PORT>
 info "Configuring UFW..."
@@ -123,11 +123,10 @@ $SUDO ufw allow 30303/udp
 $SUDO ufw allow 12000/udp
 $SUDO ufw allow 13000/tcp
 $SUDO ufw allow "${ssh_port}/tcp"
-$SUDO ufw allow 443/tcp
 $SUDO ufw --force enable
 ok "UFW enabled"
 
-# --- Step 6: geth systemd unit ---
+# --- Step 5: geth systemd unit ---
 info "Creating geth.service..."
 $SUDO tee /etc/systemd/system/geth.service > /dev/null <<EOF
 [Unit]
@@ -166,7 +165,11 @@ ok "geth service started"
 warn "Wait for geth log: 'Post-merge network, but no beacon client seen' — then beacon starts below"
 info "Check geth logs: journalctl -f -n 100 -u geth -o cat"
 
-# --- Step 7: Prysm beacon ---
+# --- Step 6: Prysm beacon ---
+# Примечание: этот скрипт проверяет SHA256 только для загрузчика prysm.sh. Сам бинарь
+# beacon-chain prysm.sh скачивает самостоятельно при первом запуске beacon.service —
+# эта загрузка вне зоны checksum-pinning данного скрипта; версия ограничена через
+# Environment=USE_PRYSM_VERSION в unit-файле ниже.
 info "Installing Prysm beacon..."
 wget -qO "${tmpdir}/prysm.sh" "${PRYSM_SCRIPT_URL}"
 verify_sha256 "${tmpdir}/prysm.sh" "$PRYSM_SCRIPT_SHA256"
@@ -209,7 +212,7 @@ $SUDO systemctl enable beacon
 $SUDO systemctl restart beacon
 ok "beacon service started"
 
-# --- Step 8: verification hints ---
+# --- Step 7: verification hints ---
 echo ""
 info "Setup complete. Wait 1–2 hours for full sync, then verify:"
 echo ""

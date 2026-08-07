@@ -65,8 +65,11 @@ ok "APT updates completed"
 # --- Step 2: Snap (optional) ---
 if need_cmd snap; then
   info "Snap: refreshing installed snaps"
-  $SUDO snap refresh
-  ok "Snap updates completed"
+  if $SUDO snap refresh; then
+    ok "Snap updates completed"
+  else
+    warn "Snap refresh failed"
+  fi
 else
   info "snap not found, skipping"
 fi

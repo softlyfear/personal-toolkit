@@ -48,7 +48,7 @@ Default port `2244/tcp` · custom port · optional flags:
 
 ```bash
 bash <(wget -qO- .../configuring_server.sh) 2255
-bash <(wget -qO- .../configuring_server.sh) --user softly --password 'MySecret123!'
+bash <(wget -qO- .../configuring_server.sh) --user softly --password-file /root/.new-user-pass
 bash <(wget -qO- .../configuring_server.sh) -u admin -p 'StrongP@ssw0rd!'
 ```
 
@@ -60,8 +60,9 @@ Without flags: username prompt · password step asks **generate secure password?
 | Flag | Short | Value | Default | Description |
 |---|---|---|---|---|
 | *(positional)* | | `port` | `2244` | SSH port |
-| `--user` | `-u` | `NAME` | prompt → `admin` | sudo username |
-| `--password` | `-p` | `PASS` | prompt or generate | user password — skips password step |
+| `--user` | `-u` | `NAME` | prompt → `admin` | sudo username (`root` not allowed) |
+| `--password-file` | | `PATH` | — | password from a file — recommended for automation, keeps it out of `ps`/shell history |
+| `--password` | `-p` | `PASS` | prompt or generate | user password — skips password step. Visible via `ps`/`/proc` while the script runs; prefer `--password-file` |
 | `--help` | `-h` | | | show help and exit |
 
 </details>
@@ -186,7 +187,7 @@ Run from a local clone.
 
 | Script | |
 |---|---|
-| [`cosmos_node_commands.sh`](web3/cosmos_node_commands.sh) | `balance` · `delegate` · `rewards` · `status` · `logs` |
+| [`cosmos_node_commands.sh`](web3/cosmos_node_commands.sh) | `delegate` · `balance` · `rewards` · `unjail` · `voting` · `status` · `logs` · `restart` · `add` (on-chain actions and `restart` ask for confirmation) |
 | [`geth+beacon.sh`](web3/geth+beacon.sh) | Sepolia geth + Prysm beacon |
 
 ```bash

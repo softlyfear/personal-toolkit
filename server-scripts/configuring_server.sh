@@ -2,7 +2,7 @@
 #
 # configuring_server.sh — initial VPS hardening (Ubuntu/Debian)
 #
-# Usage:  bash configuring_server.sh [port] [--user NAME] [--password PASS]
+# Usage:  bash configuring_server.sh [port] [--user NAME] [--password PASS | --password-file PATH]
 # Requires: root, interactive TTY (/dev/tty)
 #
 # Execution order (main):
@@ -29,7 +29,6 @@ readonly SSHD_DROPIN_DIR="/etc/ssh/sshd_config.d"
 # а drop-in'ы читаются в лексикографическом порядке — 00- побеждает 50-cloud-init.conf
 readonly SSHD_DROPIN_FILE="${SSHD_DROPIN_DIR}/00-hardening.conf"
 
-# Разрешённые типы ключей: только реально существующие ed25519/ecdsa-sha2-nistp*
 readonly SSH_KEY_TYPE='ssh-ed25519|ecdsa-sha2-nistp(256|384|521)'
 readonly SSH_KEY_PATTERN_FILE="(^|[[:space:],\"])(${SSH_KEY_TYPE}) "
 
@@ -54,6 +53,7 @@ SCRIPT_SUCCEEDED=false
 SYSCTL_LOG=""
 SSH_USER_PASSWORD=""
 CLI_PRESET_PASSWORD=""
+PROVIDER_USER_CLEANUP_FAILED=false
 
 
 # =============================================================================
@@ -179,6 +179,15 @@ sanitize_username_input() {
   printf '%s' "$raw" | LC_ALL=C tr -cd '[:alnum:]_-' | tr '[:upper:]' '[:lower:]'
 }
 
+# root запрещён: PermitRootLogin no всё равно заблокирует вход под этим именем,
+# и оператор молча получит нерабочий доступ без возможности отката.
+is_reserved_username() {
+  case "$1" in
+    root) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 prompt_yes_no() {
   local -n _result=$1
   local prompt=$2
@@ -240,6 +249,12 @@ prompt_sudo_username() {
     raw="$(sanitize_username_input "$raw")"
     SSH_USER="${raw:-admin}"
 
+    if is_reserved_username "$SSH_USER"; then
+      warn "Username '$SSH_USER' is reserved (root login stays disabled by this script) — choose another (try again $attempt/$max_attempts):"
+      (( attempt++ )) || true
+      continue
+    fi
+
     if [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
       return 0
     fi
@@ -252,7 +267,6 @@ prompt_sudo_username() {
 validate_password_strength() {
   local pass="$1"
 
-  # Basic policy: 12+ chars, upper/lower/digit/special.
   [[ ${#pass} -ge 12 ]] || return 1
   [[ "$pass" =~ [[:upper:]] ]] || return 1
   [[ "$pass" =~ [[:lower:]] ]] || return 1
@@ -353,18 +367,22 @@ setup_user_password() {
 usage() {
   cat <<EOF
 Usage:
-  $(basename "$0") [port] [--user NAME] [--password PASS]
+  $(basename "$0") [port] [--user NAME] [--password PASS | --password-file PATH]
 
 Options:
-  port              SSH port (default: ${DEFAULT_SSH_PORT})
-  --user, -u NAME   sudo username (default: prompt, fallback admin)
-  --password, -p    user password — skip password step (default: prompt or generate)
-  --help, -h        show this help
+  port                   SSH port (default: ${DEFAULT_SSH_PORT})
+  --user, -u NAME        sudo username (default: prompt, fallback admin)
+  --password-file PATH   read password from a file — recommended for
+                          automation, does not expose the value via ps/argv
+  --password, -p PASS    user password — skips the password prompt.
+                          WARNING: visible via ps/proc while the script runs;
+                          prefer --password-file
+  --help, -h             show this help
 
 Examples:
   $(basename "$0")
   $(basename "$0") 2255
-  $(basename "$0") --user softly --password 'MySecret123!'
+  $(basename "$0") --user softly --password-file /root/.new-user-pass
   $(basename "$0") 2255 -u admin -p 'StrongP@ssw0rd!'
 EOF
 }
@@ -378,11 +396,23 @@ parse_cli_args() {
         [[ $# -ge 2 ]] || err "--user requires a value"
         SSH_USER="$(sanitize_username_input "$2")"
         [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || err "Invalid --user: $2"
+        is_reserved_username "$SSH_USER" && err "--user root is not allowed — root login stays disabled by this script"
         shift 2
         ;;
       --password | -p)
         [[ $# -ge 2 ]] || err "--password requires a value"
         CLI_PRESET_PASSWORD="$2"
+        warn "--password exposes the value via 'ps'/'/proc/<pid>/cmdline' while this script runs — prefer --password-file for automation"
+        shift 2
+        ;;
+      --password-file)
+        [[ $# -ge 2 ]] || err "--password-file requires a path"
+        [[ -f "$2" ]] || err "--password-file not found: $2"
+        [[ -z "$(find "$2" -perm -044 2>/dev/null)" ]] \
+          || warn "--password-file $2 is group/world-readable — recommended: chmod 600 $2"
+        CLI_PRESET_PASSWORD="$(head -n1 -- "$2")"
+        CLI_PRESET_PASSWORD="${CLI_PRESET_PASSWORD%$'\r'}"
+        [[ -n "$CLI_PRESET_PASSWORD" ]] || err "--password-file is empty: $2"
         shift 2
         ;;
       --help | -h)
@@ -686,6 +716,8 @@ trap rollback_on_failure EXIT
 
 remove_provider_default_user() {
   local stale_user="$PROVIDER_DEFAULT_USER"
+  local max_attempts=3
+  local attempt=1
 
   if [[ "$SSH_USER" == "$stale_user" ]]; then
     info "Target user is '$stale_user' — skipping provider default cleanup"
@@ -707,14 +739,28 @@ remove_provider_default_user() {
   fi
 
   warn "Removing provider default user '$stale_user' (target user: $SSH_USER)..."
-  pkill -u "$stale_user" 2>/dev/null || true
-  sleep 1
   rm -f "/etc/sudoers.d/${stale_user}"
-  userdel -rf "$stale_user" || {
-    warn "Failed to remove user '$stale_user'"
-    return 1
-  }
-  ok "Removed provider default user '$stale_user'"
+
+  # ⚠️ РИСК: userdel -rf необратимо удаляет аккаунт и его домашний каталог.
+  # Откат невозможен — выполняется только после проверки (verify_ssh_authorized_key)
+  # рабочего доступа под новым sudo-пользователем.
+  while (( attempt <= max_attempts )); do
+    pkill -u "$stale_user" 2>/dev/null || true
+    sleep 1
+    pkill -9 -u "$stale_user" 2>/dev/null || true
+    sleep 1
+
+    if userdel -rf "$stale_user" && ! id "$stale_user" &>/dev/null; then
+      ok "Removed provider default user '$stale_user'"
+      return 0
+    fi
+
+    warn "userdel attempt $attempt/$max_attempts failed for '$stale_user' — retrying"
+    (( attempt++ )) || true
+  done
+
+  warn "Failed to remove user '$stale_user' after $max_attempts attempts"
+  return 1
 }
 
 clear_history_file_for_user() {
@@ -734,20 +780,32 @@ clear_history_file_for_user() {
 }
 
 clear_password_cli_history() {
-  # Best-effort cleanup when --password was used.
-  # Note: parent shell in-memory history cannot be fully controlled from this script.
+  # Best-effort: пока скрипт работает, --password виден в `ps aux` и
+  # /proc/<pid>/cmdline всем локальным пользователям — это уровень ядра Linux,
+  # задним числом не стирается. Единственный способ этого избежать — --password-file.
   [[ -n "$CLI_PRESET_PASSWORD" ]] || return 0
 
-  warn "Clearing shell history files because --password was used (best-effort)..."
+  warn "Clearing shell history files because --password/--password-file was used (best-effort)..."
   clear_history_file_for_user root
 
   if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
     clear_history_file_for_user "$SUDO_USER"
   fi
+
+  unset CLI_PRESET_PASSWORD
 }
 
 ensure_sudo_user() {
   if id "$SSH_USER" &>/dev/null; then
+    local existing_uid=""
+    existing_uid="$(id -u "$SSH_USER")"
+    if (( existing_uid < 1000 )); then
+      warn "'$SSH_USER' already exists as a SYSTEM account (uid=$existing_uid) — granting sudo/SSH access to it is unusual"
+      local confirm_system_user=true
+      prompt_yes_no confirm_system_user "Grant sudo and SSH key access to existing system account '$SSH_USER' anyway?" false
+      [[ "$confirm_system_user" == "true" ]] \
+        || err "Aborted: refusing to grant access to system account '$SSH_USER' (uid=$existing_uid) — pick a different --user"
+    fi
     warn "User $SSH_USER already exists"
   else
     useradd -m -s /bin/bash "$SSH_USER"
@@ -889,7 +947,7 @@ backup_sshd_config() {
 apply_sshd_hardening() {
   local -a auth_lines=()
   backup_sshd_config
-  # Удаляем устаревший drop-in (99-) и cloud-init-переопределения при повторном запуске
+  # Из старых версий этого скрипта — теперь харднинг живёт в 00-hardening.conf
   rm -f "${SSHD_DROPIN_DIR}/99-hardening.conf"
 
   if [[ "$USE_SSH_KEY_AUTH" == "true" ]]; then
@@ -1289,12 +1347,22 @@ ensure_root_only_allow /etc/cron.allow
 ensure_root_only_allow /etc/at.allow
 ok "cron/at restricted"
 
-# Final cleanup: run only after all hardening steps succeeded.
+# --- Final cleanup: default-user removal and secret hygiene ---
+# Критический харднинг (SSH/UFW/Fail2Ban/sysctl/journald) уже завершён успешно —
+# ошибка в шагах ниже не должна откатывать его через rollback_on_failure.
+SCRIPT_SUCCEEDED=true
+
+sep
+info "Removing provider default user..."
 if ! remove_provider_default_user; then
-  warn "Provider default user cleanup skipped/failed"
+  PROVIDER_USER_CLEANUP_FAILED=true
 fi
 
 clear_password_cli_history
 
-SCRIPT_SUCCEEDED=true
 print_final_summary
+unset SSH_USER_PASSWORD
+
+if [[ "$PROVIDER_USER_CLEANUP_FAILED" == "true" ]]; then
+  err "Provider default user '${PROVIDER_DEFAULT_USER}' still exists after cleanup retries — remove manually: userdel -rf ${PROVIDER_DEFAULT_USER}"
+fi

@@ -73,8 +73,13 @@ pick_interactive() {
   local tool=""
   local ans=""
 
+  if [[ ! -r /dev/tty ]]; then
+    err "Interactive input requires a TTY. Download first: wget -qO /tmp/install-dev-tools.sh <raw-url> && bash /tmp/install-dev-tools.sh --interactive"
+  fi
+
   for tool in "${TOOLS[@]}"; do
-    read -r -p "Install $tool? [y/N]: " ans
+    printf 'Install %s? [y/N]: ' "$tool" >&2
+    IFS= read -r ans < /dev/tty
     if [[ "$ans" =~ ^[Yy]$ ]]; then
       selected+=("$tool")
     fi
@@ -95,11 +100,19 @@ install_git() {
 }
 
 install_uv() {
+  local tmp_installer=""
+
   info "Installing uv..."
   if ! need_cmd wget; then
     err "wget is required"
   fi
-  wget -qO- https://astral.sh/uv/install.sh | sh
+
+  warn "uv installer comes from a third party (astral.sh) and is not checksum-pinned in this repo"
+  tmp_installer="$(mktemp)"
+  trap 'rm -f "$tmp_installer"' RETURN
+  wget -qO "$tmp_installer" https://astral.sh/uv/install.sh
+  bash -n "$tmp_installer" || err "Downloaded uv installer failed bash -n (possibly corrupted/tampered)"
+  sh "$tmp_installer"
   ok "uv installed"
 }
 
@@ -125,8 +138,11 @@ install_docker() {
 
   target_user="${SUDO_USER:-$USER}"
   if [[ -n "$target_user" && "$target_user" != "root" ]]; then
-    $SUDO usermod -aG docker "$target_user" || true
-    warn "User '$target_user' added to docker group (re-login required)"
+    if $SUDO usermod -aG docker "$target_user"; then
+      warn "User '$target_user' added to docker group (re-login required)"
+    else
+      warn "Failed to add '$target_user' to docker group"
+    fi
   else
     warn "Run as regular user to auto-add docker group"
   fi
