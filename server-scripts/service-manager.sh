@@ -39,6 +39,8 @@ usage() {
 Usage:
   ${cmd} <start|stop|restart|enable|disable|status> <service...|all>
 
+Note: stop/restart execute immediately, no confirmation prompt.
+
 Examples:
   ${cmd} start postgresql
   ${cmd} stop docker

@@ -41,6 +41,20 @@ setup_sudo() {
   fi
 }
 
+require_apt_based_distro() {
+  local os_id=""
+
+  command -v apt-get >/dev/null 2>&1 || err "This script supports only Ubuntu/Debian (apt-get required)"
+
+  if [[ -r /etc/os-release ]]; then
+    os_id="$(awk -F= '$1 == "ID" {gsub(/^"|"$/, "", $2); print tolower($2); exit}' /etc/os-release)"
+    case "$os_id" in
+      ubuntu | debian) ;;
+      *) warn "Unrecognized distro ID '$os_id' — proceeding since apt-get is present, but this script is tested only on Ubuntu/Debian" ;;
+    esac
+  fi
+}
+
 prompt_new_user() {
   local max_attempts=5
   local attempt=1
@@ -147,6 +161,7 @@ disable_root_xrdp_login() {
 # =============================================================================
 
 setup_sudo
+require_apt_based_distro
 
 # --- Step 1: system update ---
 info "Updating system packages..."

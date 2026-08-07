@@ -17,7 +17,7 @@ readonly BIN_DIR="/usr/local/bin"
 readonly SOURCE_URL="${BASE_URL}/update_system_all.sh"
 readonly TARGET_FILE="${BIN_DIR}/sysupdate"
 # Обновляйте checksum одновременно с update_system_all.sh.
-readonly EXPECTED_SHA256="151196675e87cac8613e0efd6eb5bedbb5c0112626c93eba8a8e32d246160661"
+readonly EXPECTED_SHA256="490e5915d72aeaf8443b3138b40e0dd1beddf48630f17243acb1ec6d1d050726"
 
 
 # =============================================================================
@@ -58,6 +58,8 @@ trap cleanup EXIT
 
 info "Installing sysupdate to ${BIN_DIR}..."
 wget -qO "$tmp_file" "$SOURCE_URL"
+
+[[ "$EXPECTED_SHA256" =~ ^[[:xdigit:]]{64}$ ]] || err "Некорректный формат EXPECTED_SHA256 в самом install_sysupdate.sh"
 
 actual_sha256="$(sha256sum "$tmp_file")"
 actual_sha256="${actual_sha256%% *}"

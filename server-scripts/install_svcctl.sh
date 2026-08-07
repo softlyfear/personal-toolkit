@@ -17,7 +17,7 @@ readonly BIN_DIR="/usr/local/bin"
 readonly SOURCE_URL="${BASE_URL}/service-manager.sh"
 readonly TARGET_FILE="${BIN_DIR}/svcctl"
 # Обновляйте checksum одновременно с service-manager.sh.
-readonly EXPECTED_SHA256="286c85f0415753ad3533dacf0540c78f83d5b1bb1b333c456a6fed052081c58c"
+readonly EXPECTED_SHA256="0d08f1f06d594155f31631e9741764b40bf2ce90a645e3febccb19dee297b35b"
 
 
 # =============================================================================
@@ -58,6 +58,8 @@ trap cleanup EXIT
 
 info "Installing svcctl to ${BIN_DIR}..."
 wget -qO "$tmp_file" "$SOURCE_URL"
+
+[[ "$EXPECTED_SHA256" =~ ^[[:xdigit:]]{64}$ ]] || err "Некорректный формат EXPECTED_SHA256 в самом install_svcctl.sh"
 
 actual_sha256="$(sha256sum "$tmp_file")"
 actual_sha256="${actual_sha256%% *}"
