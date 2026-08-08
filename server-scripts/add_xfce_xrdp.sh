@@ -41,6 +41,17 @@ setup_sudo() {
   fi
 }
 
+wait_for_dpkg_lock() {
+  command -v fuser >/dev/null 2>&1 || return 0
+  local waited=0
+  while $SUDO fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock >/dev/null 2>&1; do
+    (( waited == 0 )) && info "Waiting for apt/dpkg lock (unattended-upgrades?)..."
+    (( waited >= 300 )) && { warn "dpkg lock still held after 300s — proceeding anyway"; return 0; }
+    sleep 5
+    (( waited += 5 ))
+  done
+}
+
 require_apt_based_distro() {
   local os_id=""
 
@@ -97,7 +108,7 @@ ensure_ssh_ufw_rule() {
       sshd_bin="/usr/sbin/sshd"
     fi
     if [[ -n "$sshd_bin" ]]; then
-      ssh_port="$($SUDO "$sshd_bin" -T 2>/dev/null | awk '/^port /{print $2; exit}')"
+      ssh_port="$( { $SUDO "$sshd_bin" -T 2>/dev/null || true; } | awk '/^port /{print $2; exit}')"
     fi
   fi
 
@@ -163,14 +174,21 @@ disable_root_xrdp_login() {
 setup_sudo
 require_apt_based_distro
 
+export DEBIAN_FRONTEND=noninteractive
+export APT_LISTCHANGES_FRONTEND=none
+export NEEDRESTART_MODE=a
+
 # --- Step 1: system update ---
 info "Updating system packages..."
+wait_for_dpkg_lock
 $SUDO apt-get update
+wait_for_dpkg_lock
 $SUDO apt-get upgrade -y
 ok "System updated"
 
 # --- Step 2: firewall before xrdp can start ---
 info "Configuring UFW (RDP port ${RDP_PORT}/tcp)..."
+wait_for_dpkg_lock
 $SUDO apt-get install -y ufw
 ensure_ssh_ufw_rule
 prompt_rdp_source_ip
@@ -190,6 +208,7 @@ ok "UFW enabled before xrdp installation"
 
 # --- Step 3: desktop and xrdp ---
 info "Installing XFCE and xrdp..."
+wait_for_dpkg_lock
 $SUDO apt-get install -y xfce4 xfce4-goodies xrdp
 $SUDO adduser xrdp ssl-cert
 ok "XFCE and xrdp installed"
