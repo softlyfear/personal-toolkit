@@ -39,6 +39,9 @@ readonly SSH_KEY_PATTERN_FILE="(^|[[:space:],\"])(${SSH_KEY_TYPE}) "
 
 ROLLBACK_ID="$(date +%Y%m%d_%H%M%S)"
 ROLLBACK_SSHD_BACKUP=""
+ROLLBACK_SSHD_DROPIN_BACKUP=""
+ROLLBACK_SSHD_DROPIN_HAD_FILE=false
+ROLLBACK_FAIL2BAN_TOUCHED=false
 ROLLBACK_FAIL2BAN_BACKUP=""
 ROLLBACK_FAIL2BAN_HAD_FILE=false
 ROLLBACK_SUDOERS_BACKUP=""
@@ -630,6 +633,10 @@ handle_ssh_socket() {
     SSH_SOCKET_DISABLED=true
   fi
 
+  if systemctl is-enabled ssh.socket 2>/dev/null | grep -q '^masked$'; then
+    return 0
+  fi
+
   if systemctl mask ssh.socket >/dev/null 2>&1; then
     SSH_SOCKET_MASKED=true
   fi
@@ -642,14 +649,19 @@ handle_ssh_socket() {
 
 rollback_on_failure() {
   local exit_code=$?
-  [[ "$SCRIPT_SUCCEEDED" == "true" ]] && return 0
+  [[ "$exit_code" -eq 0 || "$SCRIPT_SUCCEEDED" == "true" ]] && return 0
 
   sep
   warn "Script failed (exit $exit_code). Rolling back critical changes..."
 
-  if [[ -f "$SSHD_DROPIN_FILE" ]]; then
-    rm -f "$SSHD_DROPIN_FILE"
-    warn "Removed $SSHD_DROPIN_FILE"
+  if [[ -n "$ROLLBACK_SSHD_BACKUP" ]]; then
+    if [[ "$ROLLBACK_SSHD_DROPIN_HAD_FILE" == "true" && -f "$ROLLBACK_SSHD_DROPIN_BACKUP" ]]; then
+      cp "$ROLLBACK_SSHD_DROPIN_BACKUP" "$SSHD_DROPIN_FILE"
+      warn "Restored $SSHD_DROPIN_FILE from backup"
+    elif [[ "$ROLLBACK_SSHD_DROPIN_HAD_FILE" == "false" && -f "$SSHD_DROPIN_FILE" ]]; then
+      rm -f "$SSHD_DROPIN_FILE"
+      warn "Removed $SSHD_DROPIN_FILE"
+    fi
   fi
 
   if [[ -n "$ROLLBACK_SSHD_BACKUP" && -f "$ROLLBACK_SSHD_BACKUP" ]]; then
@@ -674,14 +686,16 @@ rollback_on_failure() {
     fi
   fi
 
-  if [[ -n "$ROLLBACK_FAIL2BAN_BACKUP" && -f "$ROLLBACK_FAIL2BAN_BACKUP" ]]; then
-    cp "$ROLLBACK_FAIL2BAN_BACKUP" /etc/fail2ban/jail.local
-    systemctl restart fail2ban >/dev/null 2>&1 || true
-    warn "Restored /etc/fail2ban/jail.local from backup"
-  elif [[ "$ROLLBACK_FAIL2BAN_HAD_FILE" == "false" && -f /etc/fail2ban/jail.local ]]; then
-    rm -f /etc/fail2ban/jail.local
-    systemctl restart fail2ban >/dev/null 2>&1 || true
-    warn "Removed newly created /etc/fail2ban/jail.local"
+  if [[ "$ROLLBACK_FAIL2BAN_TOUCHED" == "true" ]]; then
+    if [[ -n "$ROLLBACK_FAIL2BAN_BACKUP" && -f "$ROLLBACK_FAIL2BAN_BACKUP" ]]; then
+      cp "$ROLLBACK_FAIL2BAN_BACKUP" /etc/fail2ban/jail.local
+      systemctl restart fail2ban >/dev/null 2>&1 || true
+      warn "Restored /etc/fail2ban/jail.local from backup"
+    elif [[ "$ROLLBACK_FAIL2BAN_HAD_FILE" == "false" && -f /etc/fail2ban/jail.local ]]; then
+      rm -f /etc/fail2ban/jail.local
+      systemctl restart fail2ban >/dev/null 2>&1 || true
+      warn "Removed newly created /etc/fail2ban/jail.local"
+    fi
   fi
 
   local sudoers_file="/etc/sudoers.d/${SSH_USER:-}"
@@ -942,6 +956,12 @@ backup_sshd_config() {
   ROLLBACK_SSHD_BACKUP="${SSHD_MAIN}.bak_${ROLLBACK_ID}"
   cp "$SSHD_MAIN" "$ROLLBACK_SSHD_BACKUP"
   mkdir -p "$SSHD_DROPIN_DIR"
+
+  if [[ -f "$SSHD_DROPIN_FILE" ]]; then
+    ROLLBACK_SSHD_DROPIN_HAD_FILE=true
+    ROLLBACK_SSHD_DROPIN_BACKUP="${SSHD_DROPIN_FILE}.bak_${ROLLBACK_ID}"
+    cp "$SSHD_DROPIN_FILE" "$ROLLBACK_SSHD_DROPIN_BACKUP"
+  fi
 }
 
 apply_sshd_hardening() {
@@ -1119,6 +1139,7 @@ enable_time_sync() {
 }
 
 backup_fail2ban_config() {
+  ROLLBACK_FAIL2BAN_TOUCHED=true
   if [[ -f /etc/fail2ban/jail.local ]]; then
     ROLLBACK_FAIL2BAN_HAD_FILE=true
     ROLLBACK_FAIL2BAN_BACKUP="/etc/fail2ban/jail.local.bak_${ROLLBACK_ID}"
@@ -1134,7 +1155,7 @@ ufw_prune_stale_ssh_limit_rules() {
   while [[ "$found" == "true" ]]; do
     found=false
     while IFS= read -r rule_line; do
-      [[ "$rule_line" =~ ^[[:space:]]*\[[[:space:]]*([0-9]+)\][[:space:]]+([0-9]+)/tcp[[:space:]]+LIMIT ]] || continue
+      [[ "$rule_line" =~ ^[[:space:]]*\[[[:space:]]*([0-9]+)\][[:space:]]+([0-9]+)/tcp([[:space:]]+\(v6\))?[[:space:]]+LIMIT ]] || continue
       rule_num="${BASH_REMATCH[1]}"
       port="${BASH_REMATCH[2]}"
       if [[ "$port" != "$current_port" ]]; then
@@ -1197,6 +1218,17 @@ EOF
   ok "journald limits applied (SystemMaxUse=200M, RuntimeMaxUse=100M, MaxRetentionSec=14day)"
 }
 
+wait_for_dpkg_lock() {
+  command -v fuser >/dev/null 2>&1 || return 0
+  local waited=0
+  while fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock >/dev/null 2>&1; do
+    (( waited == 0 )) && info "Waiting for apt/dpkg lock (unattended-upgrades?)..."
+    (( waited >= 300 )) && { warn "dpkg lock still held after 300s — proceeding anyway"; return 0; }
+    sleep 5
+    (( waited += 5 ))
+  done
+}
+
 
 # =============================================================================
 # MAIN — entry point (runs top to bottom)
@@ -1222,13 +1254,16 @@ sep
 
 # --- Step 1: system update ---
 info "Updating package lists and upgrading packages..."
+wait_for_dpkg_lock
 apt-get update || err "apt-get update failed"
+wait_for_dpkg_lock
 apt-get upgrade -y || err "apt-get upgrade failed"
 ok "System updated"
 
 # --- Step 2: security packages ---
 sep
 info "Installing essential security packages..."
+wait_for_dpkg_lock
 apt-get install -y --no-install-recommends \
   sudo openssh-server fail2ban ufw unattended-upgrades \
   || err "Package installation failed"
