@@ -113,7 +113,7 @@ ensure_ssh_ufw_rule() {
   fi
 
   [[ "$ssh_port" =~ ^[0-9]+$ ]] && (( ssh_port >= 1 && ssh_port <= 65535 )) \
-    || err "Не удалось безопасно определить SSH-порт; задайте его через SSH_PORT"
+    || err "Could not safely determine the SSH port; set it via SSH_PORT"
 
   if ! $SUDO ufw status numbered 2>/dev/null | grep -qE "^[[:space:]]*\[[[:space:]]*[0-9]+\][[:space:]]+${ssh_port}/tcp"; then
     $SUDO ufw allow "${ssh_port}/tcp"
@@ -202,7 +202,7 @@ else
   $SUDO ufw allow "${RDP_PORT}/tcp"
   warn "RDP is open to all sources on ${RDP_PORT}/tcp"
 fi
-printf '%s\n' "⚠️ РИСК: неверное SSH-правило может заблокировать удалённый доступ. Откат: используйте активную SSH-сессию или консоль провайдера и выполните sudo ufw disable." >&2
+printf '%s\n' "⚠️ RISK: a wrong SSH rule can lock out remote access. Rollback: use an active SSH session or the provider's console and run sudo ufw disable." >&2
 $SUDO ufw --force enable
 ok "UFW enabled before xrdp installation"
 
@@ -226,7 +226,7 @@ ok "Root xrdp login disabled"
 
 # --- Step 6: start xrdp only after firewall and security configuration ---
 $SUDO systemctl enable xrdp
-printf '%s\n' "⚠️ РИСК: перезапуск xrdp прервёт активные RDP-сеансы. Откат: подключитесь по SSH и выполните sudo systemctl start xrdp." >&2
+printf '%s\n' "⚠️ RISK: restarting xrdp drops active RDP sessions. Rollback: connect via SSH and run sudo systemctl start xrdp." >&2
 $SUDO systemctl restart xrdp
-$SUDO systemctl is-active --quiet xrdp || err "xrdp не запустился"
+$SUDO systemctl is-active --quiet xrdp || err "xrdp failed to start"
 ok "xrdp enabled and active — connect via RDP port ${RDP_PORT}"

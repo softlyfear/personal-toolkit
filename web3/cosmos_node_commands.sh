@@ -18,15 +18,15 @@ addbash="${addbash:-}"
 chainid="${chainid:-}"
 project="${project:-}"
 token="${token:-}"
-# Количество нулей в минимальной деноминации (6 — стандарт для большинства Cosmos SDK
-# чейнов, но не универсально — проверьте decimals вашего форка перед делегированием).
+# Number of zeros in the minimal denomination (6 is standard for most Cosmos SDK
+# chains, but not universal — check your fork's decimals before delegating).
 decimals="${decimals:-6}"
-# Имя ключа в keyring, используемое во всех delegate/rewards/unjail/voting командах.
+# Keyring key name used across all delegate/rewards/unjail/voting commands.
 wallet_name="${wallet_name:-wallet}"
 
 
 # =============================================================================
-# Проверки и подтверждения
+# Checks and confirmations
 # =============================================================================
 
 _cosmos_require_vars() {
@@ -34,7 +34,7 @@ _cosmos_require_vars() {
 
   for name in "$@"; do
     if [[ -z "${!name:-}" ]]; then
-      printf 'Ошибка: переменная %s не задана\n' "$name" >&2
+      printf 'Error: variable %s is not set\n' "$name" >&2
       return 1
     fi
   done
@@ -44,7 +44,7 @@ _cosmos_require_command() {
   local command_name="$1"
 
   if ! command -v "$command_name" >/dev/null 2>&1; then
-    printf 'Ошибка: команда не найдена: %s\n' "$command_name" >&2
+    printf 'Error: command not found: %s\n' "$command_name" >&2
     return 1
   fi
 }
@@ -60,14 +60,14 @@ _cosmos_confirm_transaction() {
   local description="$1"
   local answer=""
 
-  printf '%s\n' "⚠️ РИСК: будет отправлена on-chain транзакция (${description}). Откат: после включения в блок отменить транзакцию нельзя; проверьте сеть, кошелёк и параметры." >&2
-  printf 'Продолжить в сети %s? [y/N]: ' "$chainid" >&2
+  printf '%s\n' "⚠️ RISK: this sends an on-chain transaction (${description}). Rollback: once included in a block the transaction cannot be undone; check the network, wallet, and parameters." >&2
+  printf 'Continue on network %s? [y/N]: ' "$chainid" >&2
   IFS= read -r answer
 
   case "${answer,,}" in
-    y | yes | д | да) return 0 ;;
+    y | yes) return 0 ;;
     *)
-      printf 'Транзакция отменена\n' >&2
+      printf 'Transaction cancelled\n' >&2
       return 1
       ;;
   esac
@@ -87,7 +87,7 @@ add() {
   local profile="${HOME:-}/.bash_profile"
 
   [[ -n "${HOME:-}" ]] || {
-    printf 'Ошибка: переменная HOME не задана\n' >&2
+    printf 'Error: HOME variable is not set\n' >&2
     return 1
   }
 
@@ -117,12 +117,12 @@ delegate() {
   echo -e "\033[35mHow many tokens delegate? Enter an integer\033[97m"
   IFS= read -r quantity
   if [[ ! "$quantity" =~ ^[1-9][0-9]*$ ]]; then
-    printf 'Ошибка: количество должно быть положительным целым числом\n' >&2
+    printf 'Error: quantity must be a positive integer\n' >&2
     return 1
   fi
 
   amount="$(_cosmos_denom_amount "$quantity")"
-  _cosmos_confirm_transaction "делегирование ${amount}" || return 0
+  _cosmos_confirm_transaction "delegating ${amount}" || return 0
 
   "${project}" tx staking delegate \
     "$("${project}" keys show "${wallet_name}" --bech val -a)" \
@@ -155,7 +155,7 @@ status() {
   _cosmos_require_command jq || return 1
 
   status_json="$("${project}" status 2>&1)" || {
-    printf 'Ошибка: не удалось получить статус ноды\n' >&2
+    printf 'Error: failed to get node status\n' >&2
     return 1
   }
   jq -r '.sync_info.catching_up // .SyncInfo.catching_up // empty' <<< "$status_json"
@@ -166,7 +166,7 @@ status() {
 rewards() {
   _cosmos_require_vars project chainid token || return 1
   _cosmos_require_command "$project" || return 1
-  _cosmos_confirm_transaction "вывод всех staking-наград" || return 0
+  _cosmos_confirm_transaction "withdrawing all staking rewards" || return 0
 
   "${project}" tx distribution withdraw-all-rewards \
     --from "${wallet_name}" --chain-id "${chainid}" \
@@ -177,7 +177,7 @@ rewards() {
 unjail() {
   _cosmos_require_vars project chainid token || return 1
   _cosmos_require_command "$project" || return 1
-  _cosmos_confirm_transaction "unjail валидатора" || return 0
+  _cosmos_confirm_transaction "unjailing the validator" || return 0
 
   "${project}" tx slashing unjail \
     --from "${wallet_name}" --chain-id "${chainid}" \
@@ -190,14 +190,14 @@ restart() {
 
   _cosmos_require_vars project || return 1
 
-  printf '%s\n' "⚠️ РИСК: перезапуск остановит участие валидатора в консенсусе на время рестарта (возможен пропуск блоков). Откат: после рестарта нода досинхронизируется автоматически; ручного отката не требуется." >&2
-  printf 'Перезапустить %s? [y/N]: ' "${project}" >&2
+  printf '%s\n' "⚠️ RISK: restarting stops the validator from participating in consensus while it restarts (possible missed blocks). Rollback: the node resyncs automatically after restart; no manual rollback needed." >&2
+  printf 'Restart %s? [y/N]: ' "${project}" >&2
   IFS= read -r answer
 
   case "${answer,,}" in
-    y | yes | д | да) ;;
+    y | yes) ;;
     *)
-      printf 'Перезапуск отменён\n' >&2
+      printf 'Restart cancelled\n' >&2
       return 0
       ;;
   esac
@@ -216,18 +216,18 @@ voting() {
   echo -e "\033[35mEnter id proposals\033[97m"
   IFS= read -r id
   if [[ ! "$id" =~ ^[1-9][0-9]*$ ]]; then
-    printf 'Ошибка: ID предложения должен быть положительным целым числом\n' >&2
+    printf 'Error: proposal ID must be a positive integer\n' >&2
     return 1
   fi
 
   echo -e "\033[35mEnter yes or no small case\033[97m"
   IFS= read -r selection
   if [[ "$selection" != "yes" && "$selection" != "no" ]]; then
-    printf 'Ошибка: допустимы только yes или no\n' >&2
+    printf 'Error: only yes or no are allowed\n' >&2
     return 1
   fi
 
-  _cosmos_confirm_transaction "голос ${selection} по предложению ${id}" || return 0
+  _cosmos_confirm_transaction "voting ${selection} on proposal ${id}" || return 0
   "${project}" tx gov vote "${id}" "${selection}" \
     --from "${wallet_name}" --chain-id "${chainid}" \
     --gas-prices "0.1${token}" --gas-adjustment 1.5 --gas auto -y
