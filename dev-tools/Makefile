@@ -131,5 +131,5 @@ clean:
 
 clean-all: clean
 	rm -rf .venv
-	@printf '%s\n' "⚠️ РИСК: Docker Compose сервисы будут остановлены. Откат: выполните docker compose up -d."
+	@printf '%s\n' "⚠️ RISK: Docker Compose services will be stopped. Rollback: run docker compose up -d."
 	docker compose down 2>/dev/null || true

@@ -16,7 +16,7 @@ readonly BASE_URL="https://raw.githubusercontent.com/softlyfear/my-script/main/s
 readonly BIN_DIR="/usr/local/bin"
 readonly SOURCE_URL="${BASE_URL}/update_system_all.sh"
 readonly TARGET_FILE="${BIN_DIR}/sysupdate"
-# Обновляйте checksum одновременно с update_system_all.sh.
+# Update the checksum together with update_system_all.sh.
 readonly EXPECTED_SHA256="490e5915d72aeaf8443b3138b40e0dd1beddf48630f17243acb1ec6d1d050726"
 
 
@@ -35,7 +35,7 @@ err()   { echo -e "\033[31m[ERROR] $1\033[0m" >&2; exit 1; }
 
 for required_cmd in wget sha256sum cmp install mv mktemp bash; do
   command -v "$required_cmd" >/dev/null 2>&1 \
-    || err "Не найдена обязательная команда: $required_cmd"
+    || err "Required command not found: $required_cmd"
 done
 
 SUDO=""
@@ -59,17 +59,17 @@ trap cleanup EXIT
 info "Installing sysupdate to ${BIN_DIR}..."
 wget -qO "$tmp_file" "$SOURCE_URL"
 
-[[ "$EXPECTED_SHA256" =~ ^[[:xdigit:]]{64}$ ]] || err "Некорректный формат EXPECTED_SHA256 в самом install_sysupdate.sh"
+[[ "$EXPECTED_SHA256" =~ ^[[:xdigit:]]{64}$ ]] || err "Invalid EXPECTED_SHA256 format in install_sysupdate.sh itself"
 
 actual_sha256="$(sha256sum "$tmp_file")"
 actual_sha256="${actual_sha256%% *}"
 [[ "$actual_sha256" == "$EXPECTED_SHA256" ]] \
-  || err "SHA256 не совпадает для загруженного update_system_all.sh"
+  || err "SHA256 mismatch for the downloaded update_system_all.sh"
 
-bash -n "$tmp_file" || err "Загруженный update_system_all.sh не прошёл bash -n"
+bash -n "$tmp_file" || err "Downloaded update_system_all.sh failed bash -n"
 
 if [[ -f "$TARGET_FILE" ]] && cmp -s "$tmp_file" "$TARGET_FILE"; then
-  ok "sysupdate уже обновлён"
+  ok "sysupdate is already up to date"
   exit 0
 fi
 

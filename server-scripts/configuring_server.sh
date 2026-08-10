@@ -25,8 +25,8 @@ readonly SCRIPT_RAW_URL="https://raw.githubusercontent.com/softlyfear/my-script/
 
 readonly SSHD_MAIN="/etc/ssh/sshd_config"
 readonly SSHD_DROPIN_DIR="/etc/ssh/sshd_config.d"
-# Имя с префиксом 00- обязательно: sshd применяет ПЕРВОЕ встреченное значение,
-# а drop-in'ы читаются в лексикографическом порядке — 00- побеждает 50-cloud-init.conf
+# The 00- prefix is required: sshd applies the FIRST value it encounters,
+# and drop-ins are read in lexicographic order — 00- wins over 50-cloud-init.conf
 readonly SSHD_DROPIN_FILE="${SSHD_DROPIN_DIR}/00-hardening.conf"
 
 readonly SSH_KEY_TYPE='ssh-ed25519|ecdsa-sha2-nistp(256|384|521)'
@@ -182,8 +182,8 @@ sanitize_username_input() {
   printf '%s' "$raw" | LC_ALL=C tr -cd '[:alnum:]_-' | tr '[:upper:]' '[:lower:]'
 }
 
-# root запрещён: PermitRootLogin no всё равно заблокирует вход под этим именем,
-# и оператор молча получит нерабочий доступ без возможности отката.
+# root is rejected: PermitRootLogin no would block login under that name anyway,
+# and the operator would silently end up with no working access and no way to roll back.
 is_reserved_username() {
   case "$1" in
     root) return 0 ;;
@@ -220,8 +220,8 @@ prompt_yes_no() {
     fi
 
     case "${input,,}" in
-      y|yes|д|да) _result=true; return 0 ;;
-      n|no|нет)   _result=false; return 0 ;;
+      y|yes) _result=true; return 0 ;;
+      n|no)  _result=false; return 0 ;;
     esac
 
     warn "Enter y/yes or n/no (try again $attempt/$max_attempts)"
@@ -281,7 +281,7 @@ validate_password_strength() {
 generate_secure_password() {
   local pass="" random_part=""
 
-  # hex даёт lowercase + цифры; суффикс Aa1! гарантирует upper/lower/digit/special
+  # hex yields lowercase + digits; the Aa1! suffix guarantees upper/lower/digit/special
   if command -v openssl >/dev/null 2>&1; then
     random_part="$(openssl rand -hex 12)"
   else
@@ -755,9 +755,9 @@ remove_provider_default_user() {
   warn "Removing provider default user '$stale_user' (target user: $SSH_USER)..."
   rm -f "/etc/sudoers.d/${stale_user}"
 
-  # ⚠️ РИСК: userdel -rf необратимо удаляет аккаунт и его домашний каталог.
-  # Откат невозможен — выполняется только после проверки (verify_ssh_authorized_key)
-  # рабочего доступа под новым sudo-пользователем.
+  # ⚠️ RISK: userdel -rf irreversibly removes the account and its home directory.
+  # No rollback possible — only runs after verify_ssh_authorized_key has confirmed
+  # working access under the new sudo user.
   while (( attempt <= max_attempts )); do
     pkill -u "$stale_user" 2>/dev/null || true
     sleep 1
@@ -794,9 +794,9 @@ clear_history_file_for_user() {
 }
 
 clear_password_cli_history() {
-  # Best-effort: пока скрипт работает, --password виден в `ps aux` и
-  # /proc/<pid>/cmdline всем локальным пользователям — это уровень ядра Linux,
-  # задним числом не стирается. Единственный способ этого избежать — --password-file.
+  # Best-effort: while the script runs, --password is visible via `ps aux` and
+  # /proc/<pid>/cmdline to all local users — that's a Linux kernel-level exposure,
+  # it can't be erased after the fact. The only way to avoid it is --password-file.
   [[ -n "$CLI_PRESET_PASSWORD" ]] || return 0
 
   warn "Clearing shell history files because --password/--password-file was used (best-effort)..."
@@ -967,7 +967,7 @@ backup_sshd_config() {
 apply_sshd_hardening() {
   local -a auth_lines=()
   backup_sshd_config
-  # Из старых версий этого скрипта — теперь харднинг живёт в 00-hardening.conf
+  # Leftover from older versions of this script — hardening now lives in 00-hardening.conf
   rm -f "${SSHD_DROPIN_DIR}/99-hardening.conf"
 
   if [[ "$USE_SSH_KEY_AUTH" == "true" ]]; then
@@ -1383,8 +1383,8 @@ ensure_root_only_allow /etc/at.allow
 ok "cron/at restricted"
 
 # --- Final cleanup: default-user removal and secret hygiene ---
-# Критический харднинг (SSH/UFW/Fail2Ban/sysctl/journald) уже завершён успешно —
-# ошибка в шагах ниже не должна откатывать его через rollback_on_failure.
+# Critical hardening (SSH/UFW/Fail2Ban/sysctl/journald) has already succeeded —
+# a failure in the steps below must not roll it back via rollback_on_failure.
 SCRIPT_SUCCEEDED=true
 
 sep

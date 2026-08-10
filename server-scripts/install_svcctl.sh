@@ -16,7 +16,7 @@ readonly BASE_URL="https://raw.githubusercontent.com/softlyfear/my-script/main/s
 readonly BIN_DIR="/usr/local/bin"
 readonly SOURCE_URL="${BASE_URL}/service-manager.sh"
 readonly TARGET_FILE="${BIN_DIR}/svcctl"
-# Обновляйте checksum одновременно с service-manager.sh.
+# Update the checksum together with service-manager.sh.
 readonly EXPECTED_SHA256="0d08f1f06d594155f31631e9741764b40bf2ce90a645e3febccb19dee297b35b"
 
 
@@ -35,7 +35,7 @@ err()   { echo -e "\033[31m[ERROR] $1\033[0m" >&2; exit 1; }
 
 for required_cmd in wget sha256sum cmp install mv mktemp bash; do
   command -v "$required_cmd" >/dev/null 2>&1 \
-    || err "Не найдена обязательная команда: $required_cmd"
+    || err "Required command not found: $required_cmd"
 done
 
 SUDO=""
@@ -59,17 +59,17 @@ trap cleanup EXIT
 info "Installing svcctl to ${BIN_DIR}..."
 wget -qO "$tmp_file" "$SOURCE_URL"
 
-[[ "$EXPECTED_SHA256" =~ ^[[:xdigit:]]{64}$ ]] || err "Некорректный формат EXPECTED_SHA256 в самом install_svcctl.sh"
+[[ "$EXPECTED_SHA256" =~ ^[[:xdigit:]]{64}$ ]] || err "Invalid EXPECTED_SHA256 format in install_svcctl.sh itself"
 
 actual_sha256="$(sha256sum "$tmp_file")"
 actual_sha256="${actual_sha256%% *}"
 [[ "$actual_sha256" == "$EXPECTED_SHA256" ]] \
-  || err "SHA256 не совпадает для загруженного service-manager.sh"
+  || err "SHA256 mismatch for the downloaded service-manager.sh"
 
-bash -n "$tmp_file" || err "Загруженный service-manager.sh не прошёл bash -n"
+bash -n "$tmp_file" || err "Downloaded service-manager.sh failed bash -n"
 
 if [[ -f "$TARGET_FILE" ]] && cmp -s "$tmp_file" "$TARGET_FILE"; then
-  ok "svcctl уже обновлён"
+  ok "svcctl is already up to date"
   exit 0
 fi
 

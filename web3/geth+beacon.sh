@@ -58,10 +58,10 @@ verify_sha256() {
   local expected="$2"
   local actual=""
 
-  [[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || err "Некорректная ожидаемая SHA256 для $file"
+  [[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || err "Invalid expected SHA256 for $file"
   actual="$(sha256sum "$file" | awk '{print $1}')"
-  [[ "$actual" == "$expected" ]] || err "SHA256 не совпадает для $file"
-  ok "SHA256 проверена: $(basename "$file")"
+  [[ "$actual" == "$expected" ]] || err "SHA256 mismatch for $file"
+  ok "SHA256 verified: $(basename "$file")"
 }
 
 
@@ -166,10 +166,10 @@ warn "Wait for geth log: 'Post-merge network, but no beacon client seen' — the
 info "Check geth logs: journalctl -f -n 100 -u geth -o cat"
 
 # --- Step 6: Prysm beacon ---
-# Примечание: этот скрипт проверяет SHA256 только для загрузчика prysm.sh. Сам бинарь
-# beacon-chain prysm.sh скачивает самостоятельно при первом запуске beacon.service —
-# эта загрузка вне зоны checksum-pinning данного скрипта; версия ограничена через
-# Environment=USE_PRYSM_VERSION в unit-файле ниже.
+# Note: this script only verifies the SHA256 of the prysm.sh loader. The beacon-chain
+# binary itself is downloaded by prysm.sh on the first run of beacon.service — that
+# download is outside this script's checksum-pinning scope; the version is constrained
+# via Environment=USE_PRYSM_VERSION in the unit file below.
 info "Installing Prysm beacon..."
 wget -qO "${tmpdir}/prysm.sh" "${PRYSM_SCRIPT_URL}"
 verify_sha256 "${tmpdir}/prysm.sh" "$PRYSM_SCRIPT_SHA256"
