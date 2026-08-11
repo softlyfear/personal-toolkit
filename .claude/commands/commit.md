@@ -2,6 +2,7 @@
 description: Propose 3 Conventional Commits-style commit message options for the current git changes (staged or unstaged). Never runs git commit, git add, or git reset — only suggests text. Adds an AI-authorship trailer or subject-line phrasing based on how this conversation shows the code was produced.
 argument-hint: (no arguments — just run /commit)
 allowed-tools: Bash(git rev-parse:*), Bash(git diff:*), Bash(git diff --cached:*), Bash(git diff --cached --name-status:*), Bash(git diff --name-status:*), Bash(git log:*)
+model: claude-haiku-4-5
 ---
 
 # Git Commit Message Suggester

@@ -19,14 +19,14 @@
       "Bash(scp:*)",
       "Bash(ls:*)",
       "Bash(cat:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(rm:*)",
+      "Bash(sudo:*)"
     ],
     "ask": [
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)",
-      "Bash(rm:*)",
-      "Bash(sudo:*)"
+      "Bash(git push:*)"
     ]
   }
 }

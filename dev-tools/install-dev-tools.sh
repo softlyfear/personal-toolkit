@@ -136,7 +136,7 @@ install_docker() {
   $SUDO systemctl enable docker
   $SUDO systemctl start docker
 
-  target_user="${SUDO_USER:-$USER}"
+  local target_user="${SUDO_USER:-${USER:-}}"
   if [[ -n "$target_user" && "$target_user" != "root" ]]; then
     if $SUDO usermod -aG docker "$target_user"; then
       warn "User '$target_user' added to docker group (re-login required)"
