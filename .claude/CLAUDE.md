@@ -14,11 +14,24 @@ dev-tools/         devsetup script + a copy-paste Makefile template for FastAPI 
 web3/               Cosmos/Ethereum node helpers — out of scope, see "web3/ (out of scope)" below
 ```
 
+Test tooling for `configuring_server.sh` lives in `.claude/testing/own-script/` (Claude Code-only, not part of
+the shipped repo content) — see "Testing harness" below.
+
 **Priority:** `server-scripts/` and `dev-tools/` are the actively maintained parts of this repo.
 **`server-scripts/configuring_server.sh` is the most important script here** — it is the largest, the riskiest
 (full remote-access hardening), and the one most likely to be the subject of a request. Give it the most
 scrutiny on any change. `web3/` is not currently maintained — see the dedicated note at the bottom; do not
 read, review, or modify it unless the user explicitly names a file in it.
+
+## Language convention
+
+Everything inside this repository — code comments, commit-visible docs like this file, script output/error
+strings, `.claude/commands/*.md` — is English. This includes the risk/rollback warning line (see below): it
+used to be a Russian "⚠️ РИСК: ... Откат: ..." phrasing, now it's English. The one exception is
+`.claude/output-styles/senior_linux.md`: only its embedded risk-line *template* was updated to English (since
+that template gets written into delivered code); the rest of that file governs chat-response formatting and
+stays Russian, since Claude's chat replies to the user in this project are in Russian regardless of the
+repository's own code-language convention.
 
 ## Critical constraint: scripts are curl/wget-piped, not cloned
 
@@ -48,9 +61,11 @@ Every script in `server-scripts/` and `dev-tools/` follows the same shape — ma
 - Root/sudo detection pattern: `if [[ "$(id -u)" -ne 0 ]]; then SUDO="sudo"; fi`, then prefix privileged
   commands with `$SUDO`.
 - Before any irreversible/disruptive action (service restarts that drop sessions, firewall changes),
-  print a risk/rollback warning to stderr. Existing warnings use this exact bilingual pattern — keep it:
+  print a risk/rollback warning to stderr. Existing warnings use this exact pattern — keep it (English
+  only as of the repo-wide English convention below; older revisions of this repo used a Russian
+  "⚠️ РИСК: ... Откат: ..." phrasing for this line — don't reintroduce it):
   ```
-  ⚠️ РИСК: <what could break>. Откат: <how to recover>.
+  ⚠️ RISK: <what could break>. Rollback: <how to recover>.
   ```
 - Input validation is strict and fails closed: usernames are sanitized to `[a-z0-9_-]` and reserved names
   (e.g. `root`) are rejected, IPs are regex-validated, SSH keys are type-checked (ed25519/ecdsa only —
@@ -111,9 +126,8 @@ points to preserve when modifying it:
 - `verify_ssh_port_available`, `verify_sshd_port`, and `verify_ssh_ipv4_only` re-check the *effective* runtime
   config via `sshd -T` after writing config, rather than trusting the written file — don't replace these with
   static file checks.
-- Some inline comments are in Russian (existing author convention, e.g. explaining the `00-hardening.conf`
-  drop-in ordering); it's fine to keep or add Russian comments for non-obvious rationale in this file,
-  consistent with existing style.
+- All inline comments in this file are in English (see "Language convention" below) — e.g. the rationale for
+  the `00-hardening.conf` drop-in ordering. Don't reintroduce Russian comments here.
 
 ## `dev-tools/`
 
@@ -127,9 +141,9 @@ points to preserve when modifying it:
   and optionally `alembic`/`docker compose` in the *target* project, not here. `PROJECT_NAME` is a placeholder
   (`<PROJECT_NAME>`) meant to be filled in by whoever copies it.
 
-## No tests, linter, or CI configured
+## No linter or CI configured; scenario testing lives in testing/
 
-There's no test suite, no shellcheck config, and no CI workflow in this repo. The closest thing to validation
+There's no shellcheck config and no CI workflow in this repo. The closest thing to static validation
 is the installer scripts running `bash -n <downloaded-script>` (syntax-only check) before installing. When
 changing a script, at minimum run:
 
@@ -138,6 +152,39 @@ bash -n path/to/script.sh
 ```
 
 and, if available, `shellcheck path/to/script.sh` before considering a change done.
+
+### Testing harness (`.claude/testing/own-script/`)
+
+Runs `server-scripts/configuring_server.sh` through a matrix of Docker scenarios via the `/test_own_script`
+command (`.claude/commands/test_own_script.md`). Lives under `.claude/` because it's Claude Code's own tooling,
+not shipped repo content — unlike `server-scripts/`/`dev-tools/`, sourcing sibling files here is fine, it's
+never curl/wget-piped. Nested one level under `.claude/testing/<script-name>/` (currently just `own-script/`,
+named after the `/test_own_script` command) so other scripts in this repo can get their own sibling test suite
+later without mixing files. All comments inside the harness itself are in English, per the repo-wide language
+convention above.
+
+- `run.sh` — entry point, must run inside the `images/driver.Dockerfile` container (docker-outside-of-docker,
+  needs `/var/run/docker.sock` mounted) so it can drive `expect` against the script's `/dev/tty` prompts.
+- `lib.sh` — shared helpers (image build/run, expect wrapper, assertions, cleanup registry).
+- `scenarios.sh` — the scenario matrix (`run_all_scenarios`); add new scenarios following the existing
+  `run_heavy_scenario` pattern.
+- `images/driver.Dockerfile` and `images/target.Dockerfile` are two distinct roles, not duplication: driver has
+  the docker CLI + `expect` and only ever calls `docker exec` on sibling containers, never running the script
+  itself; target has systemd as PID 1 (via `jrei/systemd-ubuntu:26.04` — most of the script's steps are
+  `systemctl`/`ufw`/`fail2ban`, which don't work in a plain container) plus `iproute2`/`procps`, and has no
+  docker CLI or socket access at all. Ubuntu only by design — Debian is intentionally not covered.
+- Every scenario runs the full script to completion (or its natural error exit) inside a real target container —
+  including argument-parsing scenarios that fail before touching any service, kept on the same image for
+  consistency rather than a separate lightweight path.
+- Cleanup: each scenario's container+image are removed right after that scenario (`cleanup_scenario`); the
+  shared base layers, apt-cache volume, and driver image are removed at the end via `trap full_teardown EXIT`
+  (fires on normal completion, error, or Ctrl-C) so nothing accumulates on the host. Never points at a real SSH
+  host — Docker-only, by design.
+- Host-OS-agnostic by construction: the user works on this repo from both Windows and native Ubuntu, so the
+  only thing that ever touches the host shell directly is the one `docker run` in `test_own_script.md` that
+  launches the driver container (plain POSIX, `MSYS_NO_PATHCONV=1` is a harmless no-op outside Git Bash) —
+  every actual test step (`lib.sh`, `scenarios.sh`, `run.sh`, `drive.exp`) runs inside Linux containers
+  regardless of host OS. Don't reintroduce host-OS-specific paths or tools into `lib.sh`/`scenarios.sh`/`run.sh`.
 
 ## web3/ (out of scope)
 
