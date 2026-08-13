@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# configuring_server.sh — initial VPS hardening (Ubuntu/Debian)
+# configuring_server.sh — initial VPS hardening (Ubuntu, latest LTS)
 #
 # Usage:  bash configuring_server.sh [port] [--user NAME] [--password PASS | --password-file PATH]
 # Requires: root, interactive TTY (/dev/tty)
@@ -1096,6 +1096,19 @@ harden_ssh_stack() {
 # Other services: NTP, UFW, Fail2Ban, sysctl, journald, cron
 # =============================================================================
 
+require_ubuntu() {
+  local os_id=""
+
+  command -v apt-get >/dev/null 2>&1 \
+    || err "This script requires Ubuntu (apt-get not found)"
+
+  if [[ -r /etc/os-release ]]; then
+    os_id="$(awk -F= '$1 == "ID" {gsub(/^"|"$/, "", $2); print tolower($2); exit}' /etc/os-release)"
+    [[ "$os_id" == "ubuntu" ]] \
+      || warn "Unrecognized distro ID '$os_id' — proceeding since apt-get is present, but this script is tested only on Ubuntu (latest LTS)"
+  fi
+}
+
 enable_time_sync() {
   timedatectl set-ntp true || err "Failed to enable NTP"
   sleep 1
@@ -1241,6 +1254,8 @@ wait_for_dpkg_lock() {
 if [[ $EUID -ne 0 ]]; then
   err "This script must be run as root. On a fresh VPS: bash $0"
 fi
+
+require_ubuntu
 
 parse_cli_args "$@"
 verify_ssh_port_available "$SSH_PORT"

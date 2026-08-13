@@ -3,7 +3,7 @@
 # add_xfce_xrdp.sh — install XFCE desktop and xrdp remote desktop
 #
 # Usage:  bash add_xfce_xrdp.sh
-# Requires: Ubuntu/Debian; root or sudo; interactive TTY for username/password
+# Requires: Ubuntu (latest LTS); root or sudo; interactive TTY for username/password
 #
 set -euo pipefail
 
@@ -55,14 +55,12 @@ wait_for_dpkg_lock() {
 require_apt_based_distro() {
   local os_id=""
 
-  command -v apt-get >/dev/null 2>&1 || err "This script supports only Ubuntu/Debian (apt-get required)"
+  command -v apt-get >/dev/null 2>&1 || err "This script requires Ubuntu (apt-get not found)"
 
   if [[ -r /etc/os-release ]]; then
     os_id="$(awk -F= '$1 == "ID" {gsub(/^"|"$/, "", $2); print tolower($2); exit}' /etc/os-release)"
-    case "$os_id" in
-      ubuntu | debian) ;;
-      *) warn "Unrecognized distro ID '$os_id' — proceeding since apt-get is present, but this script is tested only on Ubuntu/Debian" ;;
-    esac
+    [[ "$os_id" == "ubuntu" ]] \
+      || warn "Unrecognized distro ID '$os_id' — proceeding since apt-get is present, but this script is tested only on Ubuntu (latest LTS)"
   fi
 }
 

@@ -4,7 +4,7 @@
 #
 # Usage:  bash update_system_all.sh
 #         sysupdate   (after install_sysupdate.sh)
-# Requires: Ubuntu/Debian (apt-get); optional snap, flatpak
+# Requires: Ubuntu (latest LTS, apt-get); optional snap, flatpak
 #
 set -euo pipefail
 
@@ -41,7 +41,13 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 
 if ! need_cmd apt-get; then
-  err "This script supports Ubuntu/Debian systems (apt-get required)"
+  err "This script requires Ubuntu (apt-get not found)"
+fi
+
+if [[ -r /etc/os-release ]]; then
+  os_id="$(awk -F= '$1 == "ID" {gsub(/^"|"$/, "", $2); print tolower($2); exit}' /etc/os-release)"
+  [[ "$os_id" == "ubuntu" ]] \
+    || warn "Unrecognized distro ID '$os_id' — proceeding since apt-get is present, but this script is tested only on Ubuntu (latest LTS)"
 fi
 
 export DEBIAN_FRONTEND=noninteractive

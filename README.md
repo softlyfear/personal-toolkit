@@ -1,6 +1,6 @@
 # my-script
 
-Bash utilities for **Ubuntu / Debian** — run from GitHub, no clone required.
+Bash utilities for **Ubuntu** (latest LTS) — run from GitHub, no clone required.
 
 **Author:** [softlyfear](https://github.com/softlyfear)
 
@@ -168,14 +168,14 @@ make help
 
 ## Remote Desktop (xrdp)
 
-GNOME (**Ubuntu only**) or XFCE (**Ubuntu/Debian**) + new sudo user · RDP port `3389`.
+GNOME or XFCE (lighter) + new sudo user · RDP port `3389` · **Ubuntu only**.
 During setup you can optionally restrict RDP access to a trusted source IP.
 
 ```bash
-# GNOME — Ubuntu only
+# GNOME
 bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/add_gnome_xrdp.sh)
 
-# XFCE — Ubuntu/Debian, lighter
+# XFCE — lighter
 bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/add_xfce_xrdp.sh)
 ```
 

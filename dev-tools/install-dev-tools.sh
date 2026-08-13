@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# install-dev-tools.sh — install common development tools on Ubuntu/Debian
+# install-dev-tools.sh — install common development tools on Ubuntu (latest LTS)
 #
 # Usage:  bash install-dev-tools.sh [--all|--interactive|tool...]
 # Tools:  git | uv | make | postgresql | docker
@@ -156,7 +156,13 @@ install_docker() {
 # =============================================================================
 
 if ! need_cmd apt-get; then
-  err "Supported only on apt-based systems (Ubuntu/Debian)"
+  err "Supported only on Ubuntu (apt-get not found)"
+fi
+
+if [[ -r /etc/os-release ]]; then
+  os_id="$(awk -F= '$1 == "ID" {gsub(/^"|"$/, "", $2); print tolower($2); exit}' /etc/os-release)"
+  [[ "$os_id" == "ubuntu" ]] \
+    || warn "Unrecognized distro ID '$os_id' — proceeding since apt-get is present, but this script is tested only on Ubuntu (latest LTS)"
 fi
 
 if [[ "$(id -u)" -ne 0 ]]; then
