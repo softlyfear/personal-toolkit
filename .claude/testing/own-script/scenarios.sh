@@ -21,6 +21,7 @@ verify_unknown_flag()          { assert_shell "log contains Unknown option" "gre
 verify_user_root_rejected()    { assert_shell "log contains 'root is not allowed'" "grep -q 'root is not allowed' '$2'"; }
 verify_password_file_missing() { assert_shell "log contains 'password-file not found'" "grep -q 'password-file not found' '$2'"; }
 verify_invalid_key_rsa()       { assert_shell "log contains ssh-rsa rejection" "grep -q 'ssh-rsa is not supported' '$2'"; }
+verify_inline_private_key()    { assert_shell "log contains PRIVATE key rejection (not the generic error)" "grep -q 'This is a PRIVATE key' '$2'"; }
 
 verify_key_nopasswd() {
   local name="$1" rc=0
@@ -187,6 +188,18 @@ run_all_scenarios() {
     "Paste your SSH PUBLIC KEY${TAB}${FIXTURE_RSA_PUB}"
   )
   run_heavy_scenario 12_INVALID_KEY_RSA ubuntu:26.04 1 verify_invalid_key_rsa - args prompts || true
+
+  # Regression check: a single-line paste of a PRIVATE key header (what a real terminal
+  # paste collapses to, since read -r only consumes the first line) must be caught with
+  # the specific PRIVATE key message, not fall through to the generic "Invalid SSH public
+  # key" error. See load_ssh_pubkey() in configuring_server.sh.
+  args=(--user tester16)
+  prompts=(
+    "Use SSH key-only access${TAB}__NL__"
+    "Enable passwordless sudo${TAB}y"
+    "Paste your SSH PUBLIC KEY${TAB}-----BEGIN OPENSSH PRIVATE KEY-----"
+  )
+  run_heavy_scenario 16_SSH_KEY_INLINE_PRIVATE_KEY_REJECTED ubuntu:26.04 1 verify_inline_private_key - args prompts || true
 
   args=(--user tester13)
   prompts=(

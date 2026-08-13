@@ -1,0 +1,52 @@
+#!/usr/bin/expect -f
+# Drives an interactive process over /dev/tty from a "pattern(regexp)<TAB>response" file.
+# Usage: expect drive.exp "<command>" <prompts_file> <log_file> [timeout_sec]
+# response __EOF__ -> Ctrl-D; response __NL__ -> bare Enter (accept default)
+
+set cmd          [lindex $argv 0]
+set prompts_file [lindex $argv 1]
+set log_file     [lindex $argv 2]
+set per_timeout  [lindex $argv 3]
+
+if {$per_timeout eq ""} { set per_timeout 600 }
+set timeout $per_timeout
+log_user 1
+log_file -a $log_file
+
+spawn bash -c $cmd
+
+set fp [open $prompts_file r]
+while {[gets $fp line] >= 0} {
+    if {[string length [string trim $line]] == 0} { continue }
+    set parts    [split $line "\t"]
+    set pattern  [lindex $parts 0]
+    set response [lindex $parts 1]
+
+    expect {
+        -re $pattern {
+            if {$response eq "__EOF__"} {
+                send -- "\x04"
+            } elseif {$response eq "__NL__"} {
+                send -- "\r"
+            } else {
+                send -- "$response\r"
+            }
+        }
+        eof {
+            puts "\n\[drive.exp\] EOF before pattern matched: $pattern"
+            close $fp
+            catch wait result
+            exit [lindex $result 3]
+        }
+        timeout {
+            puts "\n\[drive.exp\] TIMEOUT (${per_timeout}s): $pattern"
+            close $fp
+            exit 124
+        }
+    }
+}
+close $fp
+
+expect eof
+catch wait result
+exit [lindex $result 3]
