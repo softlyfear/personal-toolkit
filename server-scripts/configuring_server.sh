@@ -518,6 +518,10 @@ load_ssh_pubkey() {
     err "You pasted the shell command, not the key. On your LAPTOP run that command, then paste the line that starts with ssh-ed25519"
   fi
 
+  if [[ "$input" == -----BEGIN* ]]; then
+    err "This is a PRIVATE key. Use the PUBLIC key (ssh-ed25519 AAAA...) or a .pub file path"
+  fi
+
   tmp="$(mktemp)"
   printf '%s\n' "$input" > "$tmp"
   if sshkey_file_valid "$tmp"; then
