@@ -4,9 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A collection of standalone Bash scripts for provisioning/hardening Ubuntu/Debian servers and setting up dev
+A collection of standalone Bash scripts for provisioning/hardening Ubuntu servers and setting up dev
 environments. There is no build system, package manager, or test suite — each script is a self-contained CLI
 tool meant to be run directly, often via `bash <(wget -qO- <raw-github-url>)` without cloning the repo first.
+
+## OS scope: Ubuntu (latest LTS) only
+
+This repo targets the current Ubuntu LTS release only (24.04/26.04 as of this writing) — never pin that
+version number in code, comments, or docs; say "Ubuntu (latest LTS)" instead, so nothing needs updating at
+the next LTS bump. Debian support has been dropped project-wide (it used to be listed alongside Ubuntu in
+README.md, this file, and several script headers/error messages — that was a stale claim, not a deliberate
+compatibility target, and has been removed everywhere except `web3/`, which is out of scope per the note at
+the bottom of this file). Where a script needs to check the running distro, follow the existing pattern: hard
+`err` only when `apt-get` itself is missing, and `warn` (not block) when `/etc/os-release`'s `ID` isn't
+`ubuntu` — this keeps the script usable on close Ubuntu-based derivatives instead of hard-failing on an
+untested but likely-compatible system. Don't add a hard block against non-Ubuntu distros without discussing
+it first — the warn-only pattern is intentional, not an oversight.
 
 ```
 server-scripts/   VPS hardening, system updates, service management, xrdp — PRIMARY FOCUS

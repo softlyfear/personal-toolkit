@@ -3,7 +3,7 @@
 # geth+beacon.sh — Sepolia execution (geth) + consensus (Prysm beacon) node setup
 #
 # Usage:  bash geth+beacon.sh
-# Requires: Ubuntu/Debian; root or sudo
+# Requires: Ubuntu (latest LTS); root or sudo
 #
 # After setup, wait for sync (may take 1–2 hours). Verify with commands at the bottom.
 #

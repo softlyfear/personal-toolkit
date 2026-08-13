@@ -58,7 +58,7 @@ require_ubuntu() {
   [[ -r /etc/os-release ]] || err "/etc/os-release not found; only Ubuntu is supported"
   os_id="$(awk -F= '$1 == "ID" {gsub(/^"|"$/, "", $2); print tolower($2); exit}' /etc/os-release)"
   [[ "$os_id" == "ubuntu" ]] \
-    || err "This script supports only Ubuntu; for Debian use add_xfce_xrdp.sh"
+    || err "This script supports only Ubuntu"
 }
 
 prompt_new_user() {
