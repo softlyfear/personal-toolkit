@@ -67,7 +67,7 @@ Works unchanged on both Windows (Docker Desktop) and native Ubuntu (Docker Engin
 repo from both. `MSYS_NO_PATHCONV=1` only matters under Git Bash (disables its path-mangling of `-v`
 arguments); it's a harmless no-op on native Linux, so don't drop it or make it conditional.
 
-Run it in the background (`run_in_background: true`) — all 15 scenarios run the script to completion, including
+Run it in the background (`run_in_background: true`) — all 16 scenarios run the script to completion, including
 a real `apt-get update/upgrade` in every systemd container, which can take 20-40+ minutes depending on network
 speed (a shared apt cache across scenarios helps a bit but doesn't remove the cost). Don't sleep-poll — wait for
 the background-completion notification.
@@ -119,10 +119,11 @@ without confirmation.
 ## Known limitations (say these out loud, don't stay quiet about them)
 
 - Ubuntu only (`jrei/systemd-ubuntu:26.04`) — Debian is intentionally not covered by this harness.
-- 15 scenarios (`.claude/testing/own-script/scenarios.sh:run_all_scenarios`): 5 on argument parsing (`--help`,
-  invalid port, unknown flag, `--user root`, missing `--password-file`) + 10 end-to-end with a full dialog —
+- 16 scenarios (`.claude/testing/own-script/scenarios.sh:run_all_scenarios`): 5 on argument parsing (`--help`,
+  invalid port, unknown flag, `--user root`, missing `--password-file`) + 11 end-to-end with a full dialog —
   both auth modes, auto/manual password, fully interactive input with no presets, port 22 (edge case),
-  `ssh-rsa` rejection, provider default user, an existing system account (uid<1000), an idempotent re-run. Not
+  `ssh-rsa` rejection, inline-pasted private key rejection, provider default user, an existing system account
+  (uid<1000), an idempotent re-run. Not
   covered: retrying username with invalid characters, mismatched passwords on manual confirmation, declining
   (not accepting) "Grant sudo... anyway?". Extend by following the `run_heavy_scenario` pattern.
 - `ufw`/`fail2ban` inside the container are checked for "did the command succeed and what ended up in the
