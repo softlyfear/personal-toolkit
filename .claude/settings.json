@@ -1,5 +1,5 @@
 {
-  "outputStyle": "Senior Linux",
+  "outputStyle": "senior-linux",
   "language": "russian",
   "env": {
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"

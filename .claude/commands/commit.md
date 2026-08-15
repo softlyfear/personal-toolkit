@@ -66,14 +66,13 @@ All 3 options must be valid Conventional Commits, differ meaningfully from each 
 - **`none`** — plain subject only. Example: `feat: add install-dev-tools.sh`
 - **`assisted`** — plain subject, blank line, then a trailer:
 
-chore: switch uv to official installer and use wget instead of curl
+      chore: switch uv to official installer and use wget instead of curl
 
-Assisted-by: AI (Cursor Grok 4.5)
+      Assisted-by: AI (Cursor Grok 4.5)
 
 - **`full`** — AI identity named directly in the subject line instead of as a trailer, subject still a valid `type: description`:
 
-fix: code review by Sonnet 5 xhigh effort
-
+      fix: code review by Sonnet 5 xhigh effort
 
 When the diff spans unrelated changes (e.g. an incidental formatting pass plus a real feature), prefer subjects describing the dominant/primary change, and add one short line after the 3 options noting the diff also touches unrelated files — without inventing a 4th option.
 
