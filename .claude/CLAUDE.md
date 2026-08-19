@@ -120,7 +120,22 @@ points to preserve when modifying it:
 - **Rollback via `trap rollback_on_failure EXIT`**: every risky mutation (sshd config, sudoers, UFW rules,
   Fail2Ban config, `ssh.socket` mask/disable) records enough state (`ROLLBACK_*` globals) to be undone if the
   script exits before `SCRIPT_SUCCEEDED=true` is set. If you add a new mutating step before that point, add
-  matching rollback state and handle it in `rollback_on_failure()`.
+  matching rollback state and handle it in `rollback_on_failure()`. **Set the `ROLLBACK_*` flag before the
+  first mutation it guards, not after the last one** — the UFW step used to set `ROLLBACK_UFW_MODIFIED=true`
+  only after `ufw --force enable`, which left the whole block unprotected on failure. UFW is rolled back by
+  restoring `UFW_STATE_FILES` (`user.rules`, `user6.rules`, `ufw.conf`, `/etc/default/ufw`), because
+  `ufw delete` has no inverse.
+- **`ufw_enforce_single_open_port()` asks before touching rules the script did not write.**
+  `ufw_rule_is_ours()` claims only its own `LIMIT` rules on other ports and the blanket `ALLOW` on 22 that
+  `add_*_xrdp.sh` leaves; anything else (an operator's 80/443) needs an explicit yes. This was verified the
+  hard way — the earlier `ufw_prune_stale_ssh_limit_rules()` silently deleted 80/tcp and 443/tcp on a re-run.
+- **`--confirm-window MINUTES`** arms `hardening-autorevert.timer` before the first access-affecting change; it
+  restores the pre-hardening `/etc/ssh` and disables UFW unless the operator runs
+  `/usr/local/sbin/hardening-confirm`. It is the only mechanism that recovers a server nobody can log into —
+  the printed "test in a new terminal" warning is advice, not recovery.
+- **`save_user_credentials()`** mirrors the password into `/root/.<user>-credentials` (mode 600). An
+  auto-generated password otherwise exists only in the operator's scrollback, which strands a reachable
+  server with unusable sudo.
 - **`SCRIPT_SUCCEEDED=true` is set before the final cleanup steps** (removing the provider's default user,
   clearing password history), not at the very end of the script. This is intentional: those steps run after
   all critical hardening has already succeeded, so their failure must not roll back working SSH/UFW/Fail2Ban

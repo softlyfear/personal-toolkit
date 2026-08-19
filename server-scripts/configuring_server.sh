@@ -32,11 +32,25 @@ readonly SSHD_DROPIN_FILE="${SSHD_DROPIN_DIR}/00-hardening.conf"
 readonly SSH_KEY_TYPE='ssh-ed25519|ecdsa-sha2-nistp(256|384|521)'
 readonly SSH_KEY_PATTERN_FILE="(^|[[:space:],\"])(${SSH_KEY_TYPE}) "
 
+# UFW keeps its rules and default policies in plain files; backing those up is the
+# only way to undo `ufw delete`, which has no inverse of its own.
+readonly UFW_STATE_FILES=(/etc/ufw/user.rules /etc/ufw/user6.rules /etc/ufw/ufw.conf /etc/default/ufw)
+
+readonly AUTOREVERT_SNAPSHOT="/root/.pre-hardening-ssh.tar"
+readonly AUTOREVERT_SCRIPT="/usr/local/sbin/hardening-autorevert"
+readonly AUTOREVERT_CONFIRM="/usr/local/sbin/hardening-confirm"
+readonly AUTOREVERT_SERVICE="/etc/systemd/system/hardening-autorevert.service"
+readonly AUTOREVERT_TIMER="/etc/systemd/system/hardening-autorevert.timer"
+# Below 5 minutes the timer could fire while the script is still finishing.
+readonly MIN_CONFIRM_WINDOW_MIN=5
+readonly MAX_CONFIRM_WINDOW_MIN=1440
+
 # =============================================================================
 # Rollback state (revert on failure until SCRIPT_SUCCEEDED=true)
 # =============================================================================
 
-ROLLBACK_ID="$(date +%Y%m%d_%H%M%S)"
+# Assigned in main so that sourcing this file runs nothing.
+ROLLBACK_ID=""
 ROLLBACK_SSHD_BACKUP=""
 ROLLBACK_SSHD_DROPIN_BACKUP=""
 ROLLBACK_SSHD_DROPIN_HAD_FILE=false
@@ -49,12 +63,14 @@ SSH_SOCKET_MASKED=false
 SSH_SOCKET_DISABLED=false
 ROLLBACK_UFW_WAS_ACTIVE=false
 ROLLBACK_UFW_MODIFIED=false
-ROLLBACK_UFW_SSH_RULE_ADDED=false
-ROLLBACK_UFW_SSH_PORT=""
+ROLLBACK_UFW_BACKUP_DIR=""
+ROLLBACK_AUTOREVERT_INSTALLED=false
 SCRIPT_SUCCEEDED=false
 SYSCTL_LOG=""
 SSH_USER_PASSWORD=""
+CREDENTIALS_FILE=""
 CLI_PRESET_PASSWORD=""
+CONFIRM_WINDOW_MIN=0
 PROVIDER_USER_CLEANUP_FAILED=false
 ROLLBACK_SYSCTL_UNIT_CREATED=false
 
@@ -155,6 +171,11 @@ print_final_summary() {
     sum_cmd "User:     ${SSH_USER}"
     sum_cmd "Password: ${SSH_USER_PASSWORD}"
     echo ""
+    if [[ -n "${CREDENTIALS_FILE}" ]]; then
+      sum_note "Also saved to ${CREDENTIALS_FILE} (root, mode 600) — delete it once stored:"
+      sum_cmd "shred -u ${CREDENTIALS_FILE}"
+      echo ""
+    fi
   fi
 
   local server_ip=""
@@ -164,6 +185,13 @@ print_final_summary() {
   sum_cmd "ssh -p ${SSH_PORT} ${SSH_USER}@${server_ip}"
   sum_cmd "sudo -i"
   echo ""
+
+  if [[ "${ROLLBACK_AUTOREVERT_INSTALLED}" == "true" ]]; then
+    sum_note "Auto-revert is armed: SSH goes back to its pre-hardening state in ${CONFIRM_WINDOW_MIN} min."
+    sum_note "Once the new session above works, cancel it:"
+    sum_cmd "sudo ${AUTOREVERT_CONFIRM}"
+    echo ""
+  fi
   echo -e "${C_M}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_R}"
 }
 
@@ -310,12 +338,34 @@ generate_secure_password() {
   return 0
 }
 
+# An auto-generated password would otherwise exist only in the terminal that ran
+# the script: losing that scrollback leaves a reachable server with unusable sudo.
+save_user_credentials() {
+  local user="$1"
+  local pass="$2"
+  local file="/root/.${user}-credentials"
+  local created=""
+
+  created="$(date -Is)"
+  (
+    umask 077
+    printf 'user=%s\npassword=%s\nssh_port=%s\ncreated=%s\n' \
+      "${user}" "${pass}" "${SSH_PORT}" "${created}" > "${file}"
+  ) || {
+    warn "Could not save credentials to ${file} — copy the password from the summary"
+    return 0
+  }
+  chmod 600 "${file}"
+  CREDENTIALS_FILE="${file}"
+}
+
 set_user_password() {
   local user="$1"
   local pass="$2"
 
   printf '%s:%s' "${user}" "${pass}" | chpasswd || err "Failed to set password for ${user}"
   SSH_USER_PASSWORD="${pass}"
+  save_user_credentials "${user}" "${pass}"
   # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
   if ! validate_password_strength "${pass}"; then
     warn "Weak password for ${user} (allowed). Recommendation: 12+ chars with upper/lower/digit/special"
@@ -389,6 +439,7 @@ usage() {
   cat << EOF
 Usage:
   $(basename "$0") [port] [--user NAME] [--password PASS | --password-file PATH]
+                          [--confirm-window MINUTES]
 
 Options:
   port                   SSH port (default: ${DEFAULT_SSH_PORT})
@@ -398,6 +449,10 @@ Options:
   --password, -p PASS    user password — skips the password prompt.
                           WARNING: visible via ps/proc while the script runs;
                           prefer --password-file
+  --confirm-window MIN   arm an auto-revert timer: SSH config and firewall go
+                          back to their pre-hardening state after MIN minutes
+                          (${MIN_CONFIRM_WINDOW_MIN}-${MAX_CONFIRM_WINDOW_MIN}) unless you run
+                          ${AUTOREVERT_CONFIRM}
   --help, -h             show this help
 
 Examples:
@@ -405,6 +460,7 @@ Examples:
   $(basename "$0") 2255
   $(basename "$0") --user softly --password-file /root/.new-user-pass
   $(basename "$0") 2255 -u admin -p 'StrongP@ssw0rd!'
+  $(basename "$0") 2255 --confirm-window 10
 EOF
 }
 
@@ -436,6 +492,14 @@ parse_cli_args() {
         CLI_PRESET_PASSWORD="$(head -n1 -- "$2")"
         CLI_PRESET_PASSWORD="${CLI_PRESET_PASSWORD%$'\r'}"
         [[ -n "${CLI_PRESET_PASSWORD}" ]] || err "--password-file is empty: $2"
+        shift 2
+        ;;
+      --confirm-window)
+        [[ $# -ge 2 ]] || err "--confirm-window requires a value in minutes"
+        [[ "$2" =~ ^[0-9]+$ ]] || err "Invalid --confirm-window: $2 (expected minutes)"
+        ((10#$2 >= MIN_CONFIRM_WINDOW_MIN && 10#$2 <= MAX_CONFIRM_WINDOW_MIN)) \
+          || err "--confirm-window must be between ${MIN_CONFIRM_WINDOW_MIN} and ${MAX_CONFIRM_WINDOW_MIN} minutes"
+        CONFIRM_WINDOW_MIN="$((10#$2))"
         shift 2
         ;;
       --help | -h)
@@ -678,6 +742,92 @@ handle_ssh_socket() {
 }
 
 # =============================================================================
+# Lockout auto-revert (--confirm-window)
+# =============================================================================
+
+remove_lockout_autorevert() {
+  systemctl disable --now hardening-autorevert.timer > /dev/null 2>&1 || true
+  rm -f "${AUTOREVERT_TIMER}" "${AUTOREVERT_SERVICE}" "${AUTOREVERT_SCRIPT}" \
+    "${AUTOREVERT_CONFIRM}" "${AUTOREVERT_SNAPSHOT}"
+  systemctl daemon-reload > /dev/null 2>&1 || true
+  ROLLBACK_AUTOREVERT_INSTALLED=false
+}
+
+# Arms a one-shot timer that puts SSH back the way it was unless the operator runs
+# hardening-confirm. The printed "test in a new terminal" warning is advice; this
+# is the only mechanism that actually recovers a server nobody can log into.
+install_lockout_autorevert() {
+  local minutes="$1"
+
+  tar -C /etc -cf "${AUTOREVERT_SNAPSHOT}" ssh || err "Failed to snapshot /etc/ssh for auto-revert"
+  chmod 600 "${AUTOREVERT_SNAPSHOT}"
+
+  cat > "${AUTOREVERT_SCRIPT}" << EOF
+#!/usr/bin/env bash
+# Installed by configuring_server.sh --confirm-window ${minutes}.
+set -uo pipefail
+logger -t hardening-autorevert "no confirmation within ${minutes}m — restoring pre-hardening SSH access"
+ufw --force disable > /dev/null 2>&1 || true
+rm -rf /etc/ssh
+tar -C /etc -xf "${AUTOREVERT_SNAPSHOT}"
+systemctl unmask ssh.socket > /dev/null 2>&1 || true
+systemctl enable --now ssh.socket > /dev/null 2>&1 || true
+systemctl restart ssh.service > /dev/null 2>&1 || true
+systemctl stop fail2ban > /dev/null 2>&1 || true
+systemctl disable --now hardening-autorevert.timer > /dev/null 2>&1 || true
+# The snapshot holds this host's private SSH keys; drop it as soon as the restore
+# that needed it has visibly produced a usable /etc/ssh.
+if [[ -s /etc/ssh/sshd_config ]]; then
+  rm -f "${AUTOREVERT_SNAPSHOT}"
+fi
+EOF
+  chmod 700 "${AUTOREVERT_SCRIPT}"
+
+  cat > "${AUTOREVERT_CONFIRM}" << EOF
+#!/usr/bin/env bash
+# Cancels the pending hardening auto-revert. Run this once a new SSH session works.
+set -uo pipefail
+systemctl disable --now hardening-autorevert.timer > /dev/null 2>&1 || true
+rm -f "${AUTOREVERT_TIMER}" "${AUTOREVERT_SERVICE}" "${AUTOREVERT_SCRIPT}" "${AUTOREVERT_SNAPSHOT}"
+systemctl daemon-reload > /dev/null 2>&1 || true
+printf 'Hardening confirmed — automatic revert cancelled.\n'
+printf 'This helper is no longer needed: rm -f %s\n' "${AUTOREVERT_CONFIRM}"
+EOF
+  chmod 700 "${AUTOREVERT_CONFIRM}"
+
+  cat > "${AUTOREVERT_SERVICE}" << EOF
+[Unit]
+Description=Revert SSH hardening because no working login was confirmed
+
+[Service]
+Type=oneshot
+ExecStart=${AUTOREVERT_SCRIPT}
+# Runs once ExecStart has exited, so the helper can delete itself without a
+# half-read script; leaving these behind would strand dead units on the host.
+ExecStopPost=/bin/bash -c 'rm -f ${AUTOREVERT_SCRIPT} ${AUTOREVERT_CONFIRM} ${AUTOREVERT_TIMER} ${AUTOREVERT_SERVICE}; systemctl daemon-reload'
+EOF
+
+  cat > "${AUTOREVERT_TIMER}" << EOF
+[Unit]
+Description=Deadline for confirming a working SSH login after hardening
+
+[Timer]
+OnActiveSec=${minutes}min
+AccuracySec=1s
+RemainAfterElapse=no
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now hardening-autorevert.timer > /dev/null 2>&1 \
+    || err "Failed to arm the auto-revert timer"
+  ROLLBACK_AUTOREVERT_INSTALLED=true
+  ok "Auto-revert armed: SSH is restored in ${minutes} min unless you run ${AUTOREVERT_CONFIRM}"
+}
+
+# =============================================================================
 # Rollback: revert critical changes on failure
 # =============================================================================
 
@@ -750,14 +900,22 @@ rollback_on_failure() {
   fi
 
   if [[ "${ROLLBACK_UFW_MODIFIED}" == "true" ]]; then
-    if [[ "${ROLLBACK_UFW_SSH_RULE_ADDED}" == "true" && -n "${ROLLBACK_UFW_SSH_PORT}" ]]; then
-      ufw delete limit "${ROLLBACK_UFW_SSH_PORT}/tcp" > /dev/null 2>&1 || true
-      warn "Removed UFW limit rule for port ${ROLLBACK_UFW_SSH_PORT}/tcp"
-    fi
-    if [[ "${ROLLBACK_UFW_WAS_ACTIVE}" != "true" ]]; then
+    restore_ufw_config
+    if [[ "${ROLLBACK_UFW_WAS_ACTIVE}" == "true" ]]; then
+      # Re-enable rather than reload: it reloads an active firewall and restores an
+      # enabled-but-stopped one, so it is correct either way.
+      ufw --force enable > /dev/null 2>&1 || true
+      warn "Restored previous UFW rules and default policies"
+    else
       ufw --force disable > /dev/null 2>&1 || true
-      warn "UFW disabled (was inactive before script)"
+      warn "UFW disabled and rules restored (was inactive before script)"
     fi
+    discard_ufw_backup
+  fi
+
+  if [[ "${ROLLBACK_AUTOREVERT_INSTALLED}" == "true" ]]; then
+    remove_lockout_autorevert
+    warn "Disarmed the auto-revert timer (the script already rolled itself back)"
   fi
 
   exit "${exit_code}"
@@ -1207,28 +1365,106 @@ backup_fail2ban_config() {
   fi
 }
 
-ufw_prune_stale_ssh_limit_rules() {
+readonly UFW_NUMBERED_RULE_RE='^[[:space:]]*\[[[:space:]]*([0-9]+)\][[:space:]]+([0-9]+)/tcp([[:space:]]+\(v6\))?[[:space:]]+(LIMIT|ALLOW)[[:space:]]+IN[[:space:]]+Anywhere'
+
+# Rules this script may remove unattended: a LIMIT rule it wrote itself on an
+# earlier run under a different port, and the blanket ALLOW on 22 that
+# add_*_xrdp.sh leaves behind. Anything else belongs to the operator.
+ufw_rule_is_ours() {
+  local port="$1" action="$2" current_port="$3"
+
+  [[ "${port}" != "${current_port}" ]] || return 1
+  [[ "${action}" == "LIMIT" ]] && return 0
+  [[ "${action}" == "ALLOW" && "${port}" == "22" ]] && return 0
+  return 1
+}
+
+ufw_foreign_allow_ports() {
   local current_port="$1"
-  local rule_line="" rule_num="" port=""
+  local rule_line="" port="" action=""
+
+  # shellcheck disable=SC2312 # `ufw status` failing yields no matching lines, which is the correct no-op outcome here
+  while IFS= read -r rule_line; do
+    [[ "${rule_line}" =~ ${UFW_NUMBERED_RULE_RE} ]] || continue
+    port="${BASH_REMATCH[2]}"
+    action="${BASH_REMATCH[4]}"
+    [[ "${port}" != "${current_port}" ]] || continue
+    # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+    ufw_rule_is_ours "${port}" "${action}" "${current_port}" && continue
+    printf '%s\n' "${port}"
+  done < <(ufw status numbered 2> /dev/null) | sort -un | tr '\n' ' '
+}
+
+# Enforces "only ${current_port}/tcp reachable". Rules the script did not write are
+# removed only after an explicit yes — silently closing a live 80/443 is an outage.
+ufw_enforce_single_open_port() {
+  local current_port="$1"
+  local rule_line="" rule_num="" port="" action=""
+  local foreign_ports=""
+  local remove_foreign=false
   local found=true
+
+  foreign_ports="$(ufw_foreign_allow_ports "${current_port}")"
+  foreign_ports="${foreign_ports% }"
+
+  if [[ -n "${foreign_ports}" ]]; then
+    warn "UFW already allows other ports from anywhere: ${foreign_ports// //tcp, }/tcp"
+    warn "Keeping them leaves more than ${current_port}/tcp reachable; removing them stops that traffic now"
+    prompt_yes_no remove_foreign "Remove these existing ALLOW rules too?" false
+    [[ "${remove_foreign}" == "true" ]] \
+      || warn "Keeping operator rules for: ${foreign_ports// //tcp, }/tcp"
+  fi
 
   while [[ "${found}" == "true" ]]; do
     found=false
     # shellcheck disable=SC2312 # `ufw status` failing yields no matching lines, which is the correct no-op outcome here
     while IFS= read -r rule_line; do
-      # LIMIT on any other port, or a blanket ALLOW on 22 left behind by another script
-      # (add_*_xrdp.sh opens it) — both contradict "only ${current_port}/tcp reachable".
-      [[ "${rule_line}" =~ ^[[:space:]]*\[[[:space:]]*([0-9]+)\][[:space:]]+([0-9]+)/tcp([[:space:]]+\(v6\))?[[:space:]]+(LIMIT|ALLOW)[[:space:]]+IN[[:space:]]+Anywhere ]] || continue
+      [[ "${rule_line}" =~ ${UFW_NUMBERED_RULE_RE} ]] || continue
       rule_num="${BASH_REMATCH[1]}"
       port="${BASH_REMATCH[2]}"
-      if [[ "${port}" != "${current_port}" ]]; then
-        ufw --force delete "${rule_num}" > /dev/null 2>&1 || true
-        warn "Removed stale UFW rule for port ${port}/tcp"
-        found=true
-        break
+      action="${BASH_REMATCH[4]}"
+      [[ "${port}" != "${current_port}" ]] || continue
+      # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+      if ! ufw_rule_is_ours "${port}" "${action}" "${current_port}" && [[ "${remove_foreign}" != "true" ]]; then
+        continue
       fi
+      ufw --force delete "${rule_num}" > /dev/null 2>&1 || true
+      warn "Removed UFW rule ${action} ${port}/tcp"
+      found=true
+      break
     done < <(ufw status numbered 2> /dev/null)
   done
+}
+
+backup_ufw_config() {
+  local file=""
+
+  ROLLBACK_UFW_BACKUP_DIR="/root/.ufw-backup_${ROLLBACK_ID}"
+  mkdir -p "${ROLLBACK_UFW_BACKUP_DIR}"
+  chmod 700 "${ROLLBACK_UFW_BACKUP_DIR}"
+  for file in "${UFW_STATE_FILES[@]}"; do
+    [[ -f "${file}" ]] || continue
+    cp -p "${file}" "${ROLLBACK_UFW_BACKUP_DIR}/${file//\//_}"
+  done
+}
+
+# Only the rollback path consumes this, so it is dead weight once the run succeeded —
+# and without this every re-run would leave another copy behind in /root.
+discard_ufw_backup() {
+  [[ -n "${ROLLBACK_UFW_BACKUP_DIR}" && -d "${ROLLBACK_UFW_BACKUP_DIR}" ]] || return 0
+  rm -rf "${ROLLBACK_UFW_BACKUP_DIR}"
+  ROLLBACK_UFW_BACKUP_DIR=""
+}
+
+restore_ufw_config() {
+  local file="" saved=""
+
+  [[ -n "${ROLLBACK_UFW_BACKUP_DIR}" && -d "${ROLLBACK_UFW_BACKUP_DIR}" ]] || return 0
+  for file in "${UFW_STATE_FILES[@]}"; do
+    saved="${ROLLBACK_UFW_BACKUP_DIR}/${file//\//_}"
+    [[ -f "${saved}" ]] && cp -p "${saved}" "${file}"
+  done
+  return 0
 }
 
 ufw_limit_port_once() {
@@ -1329,6 +1565,7 @@ wait_for_dpkg_lock() {
 main() {
   # Inside main so sourcing the file installs nothing.
   trap rollback_on_failure EXIT
+  ROLLBACK_ID="$(date +%Y%m%d_%H%M%S)"
 
   if [[ ${EUID} -ne 0 ]]; then
     err "This script must be run as root. On a fresh VPS: bash $0"
@@ -1391,6 +1628,14 @@ EOF
   USE_SSH_KEY_AUTH=""
   prompt_yes_no USE_SSH_KEY_AUTH "Use SSH key-only access on port ${SSH_PORT}/tcp? (no = login+password on same port; root disabled in both modes)"
   sep
+
+  # Armed before the first change that can cost remote access, so the window covers
+  # sshd, ssh.socket and UFW alike.
+  if ((CONFIRM_WINDOW_MIN > 0)); then
+    install_lockout_autorevert "${CONFIRM_WINDOW_MIN}"
+    sep
+  fi
+
   harden_ssh_stack
 
   # --- Step 5: UFW ---
@@ -1400,20 +1645,21 @@ EOF
     ROLLBACK_UFW_WAS_ACTIVE=true
   fi
 
+  # Flag and backup both precede the first mutation: `ufw delete` has no inverse,
+  # and a failure anywhere below must still hit the UFW branch of the rollback.
+  backup_ufw_config
+  ROLLBACK_UFW_MODIFIED=true
+
   ufw default deny incoming
   ufw default allow outgoing
 
-  ufw_prune_stale_ssh_limit_rules "${SSH_PORT}"
+  ufw_enforce_single_open_port "${SSH_PORT}"
 
-  # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
-  if ufw_limit_port_once "${SSH_PORT}/tcp"; then
-    ROLLBACK_UFW_SSH_RULE_ADDED=true
-    ROLLBACK_UFW_SSH_PORT="${SSH_PORT}"
-  fi
+  # shellcheck disable=SC2310 # returns 1 when the rule already exists — a normal re-run, not a failure
+  ufw_limit_port_once "${SSH_PORT}/tcp" || true
 
   ufw logging on
   ufw --force enable
-  ROLLBACK_UFW_MODIFIED=true
   ok "UFW enabled (logging on)"
 
   # --- Step 6: Fail2Ban ---
@@ -1489,6 +1735,7 @@ EOF
   # Critical hardening (SSH/UFW/Fail2Ban/sysctl/journald) has already succeeded —
   # a failure in the steps below must not roll it back via rollback_on_failure.
   SCRIPT_SUCCEEDED=true
+  discard_ufw_backup
 
   sep
   info "Removing provider default user..."

@@ -51,7 +51,7 @@ VPS can verify are described in
 |---|---|
 | Firewall | UFW deny incoming · **only** `${PORT}/tcp` (`limit`) · logging on |
 | Also applied | Fail2Ban (sshd · banaction=ufw · systemd backend) · unattended-upgrades (no auto-reboot) · NTP · sysctl hardening · journald limits (200M / 14 days) · cron/at → root only |
-| Safety | rollback on failure · `ssh.socket` masked if port ≠ 22 · IPv4 only |
+| Safety | rollback on failure · `ssh.socket` masked if port ≠ 22 · IPv4 only · optional `--confirm-window` auto-revert · password also written to `/root/.<user>-credentials` (mode 600) |
 
 **Install**
 
@@ -65,6 +65,7 @@ Default port `2244/tcp` · custom port · optional flags:
 bash <(wget -qO- .../configuring_server.sh) 2255
 bash <(wget -qO- .../configuring_server.sh) --user softly --password-file /root/.new-user-pass
 bash <(wget -qO- .../configuring_server.sh) -u admin -p 'StrongP@ssw0rd!'
+bash <(wget -qO- .../configuring_server.sh) 2255 --confirm-window 10
 ```
 
 Without flags: username prompt · password step asks **generate secure password?** (default yes) or manual entry · credentials in summary
@@ -78,6 +79,7 @@ Without flags: username prompt · password step asks **generate secure password?
 | `--user` | `-u` | `NAME` | prompt → `admin` | sudo username (`root` not allowed) |
 | `--password-file` | | `PATH` | — | password from a file — recommended for automation, keeps it out of `ps`/shell history |
 | `--password` | `-p` | `PASS` | prompt or generate | user password — skips password step. Visible via `ps`/`/proc` while the script runs; prefer `--password-file` |
+| `--confirm-window` | | `MINUTES` | off | arm an auto-revert: SSH config and firewall return to their pre-hardening state after `MINUTES` (5–1440) unless you run `sudo /usr/local/sbin/hardening-confirm`. Use it when you have no console access |
 | `--help` | `-h` | | | show help and exit |
 
 </details>
