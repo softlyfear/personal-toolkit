@@ -228,10 +228,19 @@ cleanup_scenario() {
 
 # run_heavy_scenario <id> <base_image> <expected_exit> <verify_fn|-> <presetup_fn|-> \
 #                     <args_array_name> <prompts_array_name>
+# SCENARIO_FILTER=<substring> runs only the matching scenarios. A full matrix is ~25 min,
+# which is too slow a loop when iterating on one scenario; unset it for the real run.
+scenario_selected() {
+  [[ -z "${SCENARIO_FILTER:-}" || "$1" == *"${SCENARIO_FILTER}"* ]]
+}
+
 run_heavy_scenario() {
   local scen_id="$1" base_image="$2" expected_exit="$3" verify_fn="$4" presetup_fn="$5"
   local -n args_ref="$6"
   local -n prompts_ref="$7"
+
+  # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+  scenario_selected "${scen_id}" || return 0
 
   local tag="cfgsrv-test:${scen_id,,}"
   local cname="cfgsrv-test-${scen_id,,}"

@@ -269,6 +269,59 @@ setup() {
   assert_failure 1
 }
 
+@test "parse_cli_args accepts a --confirm-window inside the allowed range" {
+  run bash -c "source '${REPO_ROOT}/server-scripts/configuring_server.sh'; parse_cli_args --confirm-window 10; echo \"\${CONFIRM_WINDOW_MIN}\""
+  assert_success
+  assert_output "10"
+}
+
+@test "parse_cli_args leaves the auto-revert disabled by default" {
+  run bash -c "source '${REPO_ROOT}/server-scripts/configuring_server.sh'; parse_cli_args 2255; echo \"\${CONFIRM_WINDOW_MIN}\""
+  assert_success
+  assert_output "0"
+}
+
+@test "parse_cli_args rejects a --confirm-window below the minimum" {
+  run bash -c "source '${REPO_ROOT}/server-scripts/configuring_server.sh'; parse_cli_args --confirm-window 1"
+  assert_failure 1
+}
+
+@test "parse_cli_args rejects a --confirm-window above the maximum" {
+  run bash -c "source '${REPO_ROOT}/server-scripts/configuring_server.sh'; parse_cli_args --confirm-window 2000"
+  assert_failure 1
+}
+
+@test "parse_cli_args rejects a non-numeric --confirm-window" {
+  run bash -c "source '${REPO_ROOT}/server-scripts/configuring_server.sh'; parse_cli_args --confirm-window soon"
+  assert_failure 1
+}
+
+# --- UFW rule ownership -----------------------------------------------------
+
+@test "ufw_rule_is_ours claims LIMIT rules left on another port" {
+  run ufw_rule_is_ours 2244 LIMIT 2255
+  assert_success
+}
+
+@test "ufw_rule_is_ours claims the blanket ALLOW on 22" {
+  run ufw_rule_is_ours 22 ALLOW 2244
+  assert_success
+}
+
+@test "ufw_rule_is_ours disclaims an operator ALLOW rule" {
+  for port in 80 443 8080; do
+    run ufw_rule_is_ours "${port}" ALLOW 2244
+    assert_failure
+  done
+}
+
+@test "ufw_rule_is_ours never claims the port being configured" {
+  run ufw_rule_is_ours 2244 LIMIT 2244
+  assert_failure
+  run ufw_rule_is_ours 22 ALLOW 22
+  assert_failure
+}
+
 @test "sourcing the script does not execute main" {
   run bash -c "source '${REPO_ROOT}/server-scripts/configuring_server.sh' && echo SOURCED"
   assert_success

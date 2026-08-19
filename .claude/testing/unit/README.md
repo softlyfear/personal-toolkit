@@ -36,8 +36,19 @@ that the mock was called. Those live in the scenario layer.
 ## Scenario layer
 
 Five Docker suites, each with a driver container (docker CLI + expect) driving a disposable
-systemd target container. 58 scenarios total: `own-script` 16, `devsetup` 12, `svcctl` 11,
+systemd target container. 62 scenarios total: `own-script` 20, `devsetup` 12, `svcctl` 11,
 `xrdp` 10, `sysupdate` 9.
+
+Two scenarios exercise `rollback_on_failure()`, and they are not redundant.
+`19_ROLLBACK_ON_FAILURE` forces a deterministic failure in step 6 (a `fail2ban.service`
+drop-in with `ExecStartPre=/bin/false`, written before the unit exists) and asserts the box
+is back where it started. `20_ROLLBACK_UFW_MIDSTEP` fails the *first* `ufw ... enable` via a
+pass-through wrapper, so the run dies partway through step 5 — the window where the rollback
+flag used to be unset, leaving default policies flipped and pruned rules gone. Both compare
+`ufw status verbose` byte-for-byte against a snapshot taken before the run.
+
+Killing a run with SIGKILL does **not** test any of this: bash cannot trap SIGKILL, so the
+EXIT trap never fires and nothing is rolled back.
 
 ## What Docker cannot prove — VPS only
 

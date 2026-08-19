@@ -48,6 +48,10 @@ If the build fails — stop, show the error as-is, don't silently guess at a fix
 
 ## Step 2 — Run the harness
 
+Add `-e SCENARIO_FILTER=<substring>` to run only the matching scenarios (e.g.
+`SCENARIO_FILTER=20_ROLLBACK` finishes in ~3 min instead of ~25). That is for iterating on
+one scenario only — the run that answers "does this change pass" must be unfiltered.
+
 Use the Bash tool (not `!`, since output can be long and needs interpreting):
 
 ```bash
