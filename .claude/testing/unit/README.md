@@ -50,6 +50,14 @@ flag used to be unset, leaving default policies flipped and pruned rules gone. B
 Killing a run with SIGKILL does **not** test any of this: bash cannot trap SIGKILL, so the
 EXIT trap never fires and nothing is rolled back.
 
+Both scenarios were re-run on a live VPS on 2026-08-19 by arming the same `fail2ban` drop-in
+and driving the dialog through remote `tmux`. That run found what neither container catches:
+the target image is not socket-activated, so nothing noticed that `restart_sshd_service()`
+enables `ssh.service` permanently while Ubuntu boots sshd from `ssh.socket`. The rollback now
+records the prior `is-enabled` value and restores it, but only once `ssh.socket` is re-enabled
+to take over at boot — verified by rebooting the VPS and confirming the original topology came
+back with SSH reachable.
+
 ## What Docker cannot prove — VPS only
 
 The scenario suites run in containers sharing the host kernel, in their own network
@@ -64,6 +72,7 @@ namespace, with no external client. The following therefore need a real VPS and 
 | sysctl network hardening | Container `sysctl` writes are namespaced or rejected; the host kernel is untouched | `sysctl -a` on the VPS after reboot, compare with `/etc/sysctl.d/98-hardening.conf` |
 | `systemd-timesyncd` synchronising | The unit ships `ConditionVirtualization=!container`, so it is enabled but never started; `NTPSynchronized=yes` inside Docker is the host clock showing through | `timedatectl` on the VPS |
 | Reboot-persistent state | Containers are destroyed after each scenario | Reboot the VPS and re-check ports, UFW, Fail2Ban, sysctl |
+| SSH socket activation | The target image boots sshd from `ssh.service`, so `ssh.socket` enablement is never the pre-state a rollback has to restore | `systemctl is-enabled ssh.socket ssh.service` before hardening, after a failed run, and again after a reboot |
 | `unattended-upgrades` actually upgrading | Only the config is asserted; no timer fires within a scenario | `unattended-upgrade --dry-run -d` on the VPS |
 | xrdp session usability | No RDP client, no X server, no GPU | Connect a real RDP client and log into the desktop |
 | Provider default-user removal under load | No real logged-in session holding the account open | Run on a fresh provider VPS that still has its default account |

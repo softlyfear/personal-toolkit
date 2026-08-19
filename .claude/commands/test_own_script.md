@@ -122,14 +122,16 @@ without confirmation.
 
 ## Known limitations (say these out loud, don't stay quiet about them)
 
-- Ubuntu only (`jrei/systemd-ubuntu:latest`) — Debian is intentionally not covered by this harness.
-- 16 scenarios (`.claude/testing/own-script/scenarios.sh:run_all_scenarios`): 5 on argument parsing (`--help`,
-  invalid port, unknown flag, `--user root`, missing `--password-file`) + 11 end-to-end with a full dialog —
+- Ubuntu only (`jrei/systemd-ubuntu:latest`) — no other distribution is in scope for this harness.
+- 23 scenarios (`.claude/testing/own-script/scenarios.sh:run_all_scenarios`): 5 on argument parsing (`--help`,
+  invalid port, unknown flag, `--user root`, missing `--password-file`) + 18 end-to-end with a full dialog —
   both auth modes, auto/manual password, fully interactive input with no presets, port 22 (edge case),
   `ssh-rsa` rejection, inline-pasted private key rejection, provider default user, an existing system account
-  (uid<1000), an idempotent re-run. Not
-  covered: retrying username with invalid characters, mismatched passwords on manual confirmation, declining
-  (not accepting) "Grant sudo... anyway?". Extend by following the `run_heavy_scenario` pattern.
+  (uid<1000) both accepted and declined, username retry after invalid characters, password mismatch retry,
+  foreign UFW rules kept, the confirm window, two rollback paths, an idempotent re-run. Extend by following
+  the `run_heavy_scenario` pattern.
+- The manual-password scenarios assert that a hash was set, not *which* password it hashes — the container has
+  no non-interactive way to authenticate as that user.
 - `ufw`/`fail2ban` inside the container are checked for "did the command succeed and what ended up in the
   ruleset", not real traffic filtering from an external host — the container is in its own network namespace,
   nothing leaks out.
