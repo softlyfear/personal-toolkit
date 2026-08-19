@@ -12,10 +12,9 @@ tool meant to be run directly, often via `bash <(wget -qO- <raw-github-url>)` wi
 
 This repo targets the current Ubuntu LTS release only (24.04/26.04 as of this writing) — never pin that
 version number in code, comments, or docs; say "Ubuntu (latest LTS)" instead, so nothing needs updating at
-the next LTS bump. Debian support has been dropped project-wide (it used to be listed alongside Ubuntu in
-README.md, this file, and several script headers/error messages — that was a stale claim, not a deliberate
-compatibility target, and has been removed everywhere except `web3/`, which is out of scope per the note at
-the bottom of this file). Where a script needs to check the running distro, follow the existing pattern: hard
+the next LTS bump. Ubuntu is the only supported target — no other distribution or derivative is in scope for
+code, tests, docs or review, and none should be added back. Where a script needs to check the running distro,
+follow the existing pattern: hard
 `err` only when `apt-get` itself is missing, and `warn` (not block) when `/etc/os-release`'s `ID` isn't
 `ubuntu` — this keeps the script usable on close Ubuntu-based derivatives instead of hard-failing on an
 untested but likely-compatible system. Don't add a hard block against non-Ubuntu distros without discussing
@@ -118,7 +117,8 @@ points to preserve when modifying it:
   locked down; the new user's key is verified (`verify_ssh_authorized_key`) *before* root login is disabled,
   so a bad key can't lock the operator out.
 - **Rollback via `trap rollback_on_failure EXIT`**: every risky mutation (sshd config, sudoers, UFW rules,
-  Fail2Ban config, `ssh.socket` mask/disable) records enough state (`ROLLBACK_*` globals) to be undone if the
+  Fail2Ban config, `ssh.socket` mask/disable, `ssh.service` enablement) records enough state (`ROLLBACK_*`
+  globals) to be undone if the
   script exits before `SCRIPT_SUCCEEDED=true` is set. If you add a new mutating step before that point, add
   matching rollback state and handle it in `rollback_on_failure()`. **Set the `ROLLBACK_*` flag before the
   first mutation it guards, not after the last one** — the UFW step used to set `ROLLBACK_UFW_MODIFIED=true`
@@ -257,7 +257,7 @@ convention above.
   the docker CLI + `expect` and only ever calls `docker exec` on sibling containers, never running the script
   itself; target has systemd as PID 1 (via `jrei/systemd-ubuntu:latest` — most of the script's steps are
   `systemctl`/`ufw`/`fail2ban`, which don't work in a plain container) plus `iproute2`/`procps`, and has no
-  docker CLI or socket access at all. Ubuntu only by design — Debian is intentionally not covered.
+  docker CLI or socket access at all. Ubuntu only by design.
 - Every scenario runs the full script to completion (or its natural error exit) inside a real target container —
   including argument-parsing scenarios that fail before touching any service, kept on the same image for
   consistency rather than a separate lightweight path.

@@ -287,6 +287,49 @@ verify_existing_system_account() {
   return "${rc}"
 }
 
+# Input that survives sanitize_username_input but still fails the shell-safe pattern:
+# tr keeps the digits, so "9bad!name" becomes "9badname", which useradd would reject.
+verify_username_retry() {
+  local name="$1" log="$2" rc=0
+  # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+  verify_common_hardening "${name}" "${log}" tester21 2244 password || rc=1
+  assert_shell "invalid username was re-prompted, not accepted" \
+    "grep -q 'Invalid username' '${log}'" || rc=1
+  assert_shell "the rejected input never became an account" \
+    "! docker exec ${name} id 9badname" || rc=1
+  return "${rc}"
+}
+
+verify_password_mismatch_retry() {
+  local name="$1" log="$2" rc=0
+  # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+  verify_common_hardening "${name}" "${log}" tester22 2244 password || rc=1
+  assert_shell "mismatch was caught and re-prompted" \
+    "grep -q 'Passwords did not match' '${log}'" || rc=1
+  assert_shell "the retry succeeded on attempt 2, not later" \
+    "grep -q 'Try again (2/' '${log}'" || rc=1
+  assert_shell "password actually set for tester22 after the retry" \
+    "docker exec ${name} bash -c 'getent shadow tester22 | cut -d: -f2 | grep -vqE \"^[!*]\"'" || rc=1
+  return "${rc}"
+}
+
+# The refusal path of ensure_sudo_user: answering no must abort before anything is
+# granted, and before apply_sshd_hardening has touched the sshd config at all.
+verify_system_account_declined() {
+  local name="$1" log="$2" rc=0
+  assert_shell "declining aborts with the reason named" \
+    "grep -q 'refusing to grant access to system account' '${log}'" || rc=1
+  assert_shell "svcacct did not get sudo" \
+    "! docker exec ${name} id -nG svcacct | grep -qw sudo" || rc=1
+  assert_shell "no sudoers drop-in for svcacct" \
+    "! docker exec ${name} test -e /etc/sudoers.d/svcacct" || rc=1
+  assert_shell "no authorized_keys planted for svcacct" \
+    "! docker exec ${name} test -e /home/svcacct/.ssh/authorized_keys" || rc=1
+  assert_shell "sshd hardening drop-in never written" \
+    "! docker exec ${name} test -e /etc/ssh/sshd_config.d/00-hardening.conf" || rc=1
+  return "${rc}"
+}
+
 verify_foreign_ufw_rules_kept() {
   local name="$1" log="$2" rc=0
   # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
@@ -344,6 +387,12 @@ verify_rollback_on_failure() {
     "! docker exec ${name} test -e /etc/fail2ban/jail.local" || rc=1
   assert_shell "sysctl re-apply unit removed" \
     "! docker exec ${name} test -e /etc/systemd/system/sysctl-hardening.service" || rc=1
+  assert_shell "failure location reported, not just the rollback" \
+    "grep -qE '\[ERROR\] Failed in [a-z_]+\(\) at line [0-9]+' '${log}'" || rc=1
+  assert_shell "no command text in the failure line (a password could be in it)" \
+    "! grep -q 'Failed in.*set_user_password' '${log}'" || rc=1
+  assert_shell "surviving account is named instead of left silent" \
+    "grep -q \"Left in place: user 'tester19'\" '${log}'" || rc=1
   # The strongest assertion available: the firewall is byte-for-byte what it was.
   assert_shell "UFW rules and default policies restored exactly" \
     "docker exec ${name} bash -c 'ufw status verbose > /tmp/ufw-after.txt; diff -q /root/ufw-before.txt /tmp/ufw-after.txt'" || rc=1
@@ -554,6 +603,33 @@ run_all_scenarios() {
     "Paste your SSH PUBLIC KEY${TAB}${FIXTURE_ED25519_PUB}"
   )
   run_heavy_scenario 14_EXISTING_SYSTEM_ACCOUNT ubuntu:latest 0 verify_existing_system_account presetup_system_account args prompts || true
+
+  args=()
+  prompts=(
+    "Use SSH key-only access${TAB}n"
+    "Enter sudo username${TAB}9bad!name"
+    "Invalid username${TAB}tester21"
+    "Generate secure password automatically${TAB}__NL__"
+  )
+  run_heavy_scenario 21_USERNAME_RETRY_INVALID_CHARS ubuntu:latest 0 verify_username_retry - args prompts || true
+
+  args=(--user tester22)
+  prompts=(
+    "Use SSH key-only access${TAB}n"
+    "Generate secure password automatically${TAB}n"
+    "Set password for${TAB}${MANUAL_TEST_PASSWORD}"
+    "Confirm password${TAB}Mismatched!99"
+    "Passwords did not match${TAB}${MANUAL_TEST_PASSWORD}"
+    "Confirm password${TAB}${MANUAL_TEST_PASSWORD}"
+  )
+  run_heavy_scenario 22_PASSWORD_MISMATCH_RETRY ubuntu:latest 0 verify_password_mismatch_retry - args prompts || true
+
+  args=(--user svcacct)
+  prompts=(
+    "Use SSH key-only access${TAB}__NL__"
+    "Grant sudo and SSH key access${TAB}n"
+  )
+  run_heavy_scenario 23_SYSTEM_ACCOUNT_DECLINED ubuntu:latest 1 verify_system_account_declined presetup_system_account args prompts || true
 
   args=(--user tester17)
   prompts=(

@@ -12,7 +12,9 @@
 #
 # Functions grouped by: UI · prompts · SSH keys · network · rollback · users · sshd · services
 #
-set -euo pipefail
+# -E so the ERR trap fires inside functions too: without it every failure in this file,
+# which is nothing but functions, would be reported with no location at all.
+set -Eeuo pipefail
 IFS=$'\n\t'
 
 # =============================================================================
@@ -61,6 +63,10 @@ ROLLBACK_SUDOERS_BACKUP=""
 ROLLBACK_SUDOERS_CREATED=false
 SSH_SOCKET_MASKED=false
 SSH_SOCKET_DISABLED=false
+ROLLBACK_SSH_SERVICE_UNIT=""
+ROLLBACK_SSH_SERVICE_WAS_ENABLED=""
+ROLLBACK_FAIL_LINE=""
+ROLLBACK_FAIL_FUNC=""
 ROLLBACK_UFW_WAS_ACTIVE=false
 ROLLBACK_UFW_MODIFIED=false
 ROLLBACK_UFW_BACKUP_DIR=""
@@ -706,12 +712,24 @@ verify_ssh_port_available() {
   err "Port ${port}/tcp is already in use. Specify a free port: bash $0 <port>"
 }
 
+# Ubuntu ships sshd socket-activated: ssh.socket enabled, ssh.service disabled. Enabling
+# the service here is a persistent change, so record what it was on the first call only —
+# later calls would otherwise overwrite the pre-hardening value with our own.
+record_ssh_service_state() {
+  local unit="$1"
+  [[ -n "${ROLLBACK_SSH_SERVICE_UNIT}" ]] && return 0
+  ROLLBACK_SSH_SERVICE_UNIT="${unit}"
+  ROLLBACK_SSH_SERVICE_WAS_ENABLED="$(systemctl is-enabled "${unit}" 2> /dev/null || true)"
+}
+
 restart_sshd_service() {
   # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
   if unit_exists ssh.service; then
+    record_ssh_service_state ssh.service
     systemctl enable ssh.service || true
     systemctl restart ssh.service || err "Failed to restart ssh.service"
   elif unit_exists sshd.service; then
+    record_ssh_service_state sshd.service
     systemctl enable sshd.service || true
     systemctl restart sshd.service || err "Failed to restart sshd.service"
   else
@@ -831,11 +849,27 @@ EOF
 # Rollback: revert critical changes on failure
 # =============================================================================
 
+# Keeps only the first firing: under set -E the trap runs again in every frame the error
+# unwinds through, and the innermost one is the one worth reporting. The failing command's
+# text is deliberately not recorded — set_user_password() would put a plaintext password
+# in the log, and this log is what operators paste into issues.
+record_failure_context() {
+  if [[ -z "${ROLLBACK_FAIL_LINE}" ]]; then
+    ROLLBACK_FAIL_LINE="$1"
+    ROLLBACK_FAIL_FUNC="$2"
+  fi
+}
+
 rollback_on_failure() {
   local exit_code=$?
   [[ "${exit_code}" -eq 0 || "${SCRIPT_SUCCEEDED}" == "true" ]] && return 0
 
   sep
+  if [[ -n "${ROLLBACK_FAIL_LINE}" ]]; then
+    # err() exits, which would abort the rollback before it starts; this carries the same
+    # [ERROR] prefix without leaving the trap.
+    echo -e "\033[31m[ERROR] Failed in ${ROLLBACK_FAIL_FUNC}() at line ${ROLLBACK_FAIL_LINE}\033[0m" >&2
+  fi
   warn "Script failed (exit ${exit_code}). Rolling back critical changes..."
 
   if [[ -n "${ROLLBACK_SSHD_BACKUP}" ]]; then
@@ -866,6 +900,12 @@ rollback_on_failure() {
     if [[ "${SSH_SOCKET_DISABLED}" == "true" ]]; then
       systemctl enable ssh.socket > /dev/null 2>&1 || true
       warn "Re-enabled ssh.socket"
+      # Only safe once ssh.socket is enabled again to take over at boot: the running
+      # ssh.service is deliberately left up so this rollback cannot drop the operator.
+      if [[ "${ROLLBACK_SSH_SERVICE_WAS_ENABLED}" == "disabled" && -n "${ROLLBACK_SSH_SERVICE_UNIT}" ]]; then
+        systemctl disable "${ROLLBACK_SSH_SERVICE_UNIT}" > /dev/null 2>&1 || true
+        warn "Restored ${ROLLBACK_SSH_SERVICE_UNIT} to disabled (socket-activated as before)"
+      fi
     else
       warn "Unmasked ssh.socket"
     fi
@@ -916,6 +956,13 @@ rollback_on_failure() {
   if [[ "${ROLLBACK_AUTOREVERT_INSTALLED}" == "true" ]]; then
     remove_lockout_autorevert
     warn "Disarmed the auto-revert timer (the script already rolled itself back)"
+  fi
+
+  # The account itself is never removed: the script does not track whether it created it,
+  # and deleting an operator's own user on an error path would be worse than the failure.
+  # Say what survived instead, so it is not discovered later by accident.
+  if [[ -n "${SSH_USER:-}" ]] && id "${SSH_USER}" > /dev/null 2>&1; then
+    warn "Left in place: user '${SSH_USER}' (group sudo, ~/.ssh/authorized_keys) — sudo needs a password it has none for; a re-run reuses this account"
   fi
 
   exit "${exit_code}"
@@ -1565,6 +1612,8 @@ wait_for_dpkg_lock() {
 main() {
   # Inside main so sourcing the file installs nothing.
   trap rollback_on_failure EXIT
+  # LINENO/FUNCNAME are expanded where the failure happens, not here.
+  trap 'record_failure_context "${LINENO}" "${FUNCNAME[0]:-main}"' ERR
   ROLLBACK_ID="$(date +%Y%m%d_%H%M%S)"
 
   if [[ ${EUID} -ne 0 ]]; then
