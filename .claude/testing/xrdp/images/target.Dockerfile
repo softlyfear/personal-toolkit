@@ -3,7 +3,7 @@
 # (heavy) desktop-environment install. psmisc (fuser) is a base-OS assumption used by
 # wait_for_dpkg_lock(); ca-certificates covers any HTTPS-sourced apt mirror. ufw and the
 # desktop/xrdp packages themselves are installed BY the tested script, not preinstalled.
-ARG JREI_TAG=26.04
+ARG JREI_TAG=latest
 FROM jrei/systemd-ubuntu:${JREI_TAG}
 
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \

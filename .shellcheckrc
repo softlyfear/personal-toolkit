@@ -1,0 +1,6 @@
+# ShellCheck configuration for this repository.
+# Suppressions are only ever allowed as per-line `# shellcheck disable=SCxxxx`
+# directives carrying a reason in the same line — never globally in this file.
+enable=all
+external-sources=true
+source-path=SCRIPTDIR

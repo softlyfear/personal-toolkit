@@ -2,7 +2,7 @@
 # systemctl/ufw/fail2ban calls work. No docker CLI or socket access — controlled
 # externally via `docker exec`. sudo/openssh-server/ufw/fail2ban are NOT
 # preinstalled — the tested script installs them itself.
-ARG JREI_TAG=26.04
+ARG JREI_TAG=latest
 FROM jrei/systemd-ubuntu:${JREI_TAG}
 
 # Upgrade base packages at BUILD time, not container runtime: upgrading systemd itself

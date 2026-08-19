@@ -154,17 +154,74 @@ points to preserve when modifying it:
   and optionally `alembic`/`docker compose` in the *target* project, not here. `PROJECT_NAME` is a placeholder
   (`<PROJECT_NAME>`) meant to be filled in by whoever copies it.
 
-## No linter or CI configured; scenario testing lives in testing/
+## Quality gate: RULES.md + .claude/lint.sh
 
-There's no shellcheck config and no CI workflow in this repo. The closest thing to static validation
-is the installer scripts running `bash -n <downloaded-script>` (syntax-only check) before installing. When
-changing a script, at minimum run:
+**`RULES.md` at the repo root is binding for every Bash change here — read it before editing a
+script.** It fixes the prologue (`set -euo pipefail` + `IFS=$'\n\t'`), quoting, `local`,
+stdout-vs-stderr, traps, naming, the suppression policy, and the tooling set (shellcheck, shfmt,
+bats-core, shellharden, checkbashisms — nothing else).
+
+Run the gate before considering any change done:
 
 ```bash
-bash -n path/to/script.sh
+bash .claude/lint.sh
 ```
 
-and, if available, `shellcheck path/to/script.sh` before considering a change done.
+It executes, in this order and stopping at the first failure: `shfmt -i 2 -ci -bn -sr -d`,
+`shellcheck -x -S style`, `bats .claude/testing/unit/`. Config lives in `.shellcheckrc` (`enable=all`),
+`.editorconfig`, `.gitattributes`. The file list comes from `git ls-files --cached --others`, so a
+newly created script is checked before it is ever staged; `web3/` and the vendored
+`.claude/testing/unit/test_helper/` are excluded on purpose.
+
+**Comments: only what earns its place.** Rule 11 in `RULES.md`. A comment exists for a *why*
+the code can't show — a constraint, an ordering requirement, a trap that already caused a bug.
+Don't restate the line, don't narrate the change, don't leave notes about the work itself. One
+line where one line does. This applies to every file here, including the test harness.
+
+Two things that are easy to get wrong and are already documented in `RULES.md`:
+
+- **Suppressions.** Never global in `.shellcheckrc`. Per-line `# shellcheck disable=SCxxxx # reason`
+  with the reason on the same line. ShellCheck rejects a directive in front of `elif`, a `case`
+  branch, or a closing `}`/`done` (SC1123/SC1124) — there it goes in front of the enclosing
+  compound command.
+- **`IFS=$'\n\t'` has teeth.** `read -a` splits on `IFS`, so parsing space-separated values such as
+  `SSH_CONNECTION` needs an explicit `IFS=' ' read -r -a ...` on that command. Sourcing a script
+  from bats leaks its `IFS` into the runner and makes failing tests vanish from the report —
+  `.claude/testing/unit/helper.bash` restores the default.
+
+### Main-guard: every shipped script is sourceable
+
+Each script in `server-scripts/`/`dev-tools/` ends with
+
+```bash
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  main "$@"
+fi
+```
+
+so `.claude/testing/unit/*.bats` can `source` it for its functions without running anything. Keep source-time side
+effects out of file scope — that includes trap registration (`configuring_server.sh` registers
+`trap rollback_on_failure EXIT` inside `main`, not at file scope, for exactly this reason).
+
+### Repo root is for shipped scripts only; tooling lives under `.claude/`
+
+The root holds what actually gets delivered (`server-scripts/`, `dev-tools/`, `web3/`), the docs,
+and the tool dotfiles that must sit there (`.shellcheckrc`, `.editorconfig`, `.gitattributes`).
+Everything else Claude Code needs goes under `.claude/`: the gate is `.claude/lint.sh`, the tests
+are `.claude/testing/`. **Don't add `scripts/`, `test/`, or any other tooling directory to the
+root** — this has already been corrected once.
+
+### All tests live under `.claude/testing/` — never in a top-level `test/`
+
+One root for everything test-related: `.claude/testing/unit/` holds the bats unit tests (plus the
+vendored `test_helper/`), and the sibling directories hold the Docker scenario suites, each named
+after the script it exercises.
+
+`.claude/testing/unit/*.bats` covers pure logic only. Anything that mutates the system (apt, systemctl, ufw,
+userdel, sshd config) belongs to the Docker suites. `.claude/testing/unit/README.md` holds
+the split and, importantly, the list of things **no** container can prove (real SSH lockout, UFW
+packet filtering, Fail2Ban actually banning, host sysctl, reboot persistence, xrdp sessions) —
+those need a real VPS.
 
 ### Testing harness (`.claude/testing/own-script/`)
 
@@ -183,7 +240,7 @@ convention above.
   `run_heavy_scenario` pattern.
 - `images/driver.Dockerfile` and `images/target.Dockerfile` are two distinct roles, not duplication: driver has
   the docker CLI + `expect` and only ever calls `docker exec` on sibling containers, never running the script
-  itself; target has systemd as PID 1 (via `jrei/systemd-ubuntu:26.04` — most of the script's steps are
+  itself; target has systemd as PID 1 (via `jrei/systemd-ubuntu:latest` — most of the script's steps are
   `systemctl`/`ufw`/`fail2ban`, which don't work in a plain container) plus `iproute2`/`procps`, and has no
   docker CLI or socket access at all. Ubuntu only by design — Debian is intentionally not covered.
 - Every scenario runs the full script to completion (or its natural error exit) inside a real target container —

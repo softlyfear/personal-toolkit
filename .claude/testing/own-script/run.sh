@@ -8,16 +8,18 @@
 # containers are resolved by the daemon relative to the host, not the calling process
 # (the docker-outside-of-docker trap).
 set -euo pipefail
+IFS=$'\n\t'
 
 : "${HOST_REPO_PATH:?HOST_REPO_PATH is not set — run via .claude/commands/test_own_script.md}"
 
-readonly TESTING_DIR="/work/repo/.claude/testing/own-script"  # path inside the driver container
-readonly REPO_MOUNT_SRC="$HOST_REPO_PATH"                     # path as seen by the daemon
+readonly TESTING_DIR="/work/repo/.claude/testing/own-script" # path inside the driver container
+readonly REPO_MOUNT_SRC="${HOST_REPO_PATH}"                  # path as seen by the daemon
 # /work/repo is mounted :ro (see test_own_script.md); results need a separate writable mount.
-readonly RESULTS_DIR="/work/results/$(date +%Y%m%d_%H%M%S)"
+RESULTS_DIR="/work/results/$(date +%Y%m%d_%H%M%S)"
+readonly RESULTS_DIR
 readonly FULL_CLEAN="${FULL_CLEAN:-1}"
 
-mkdir -p "$RESULTS_DIR"
+mkdir -p "${RESULTS_DIR}"
 
 # shellcheck source=./lib.sh
 source "${TESTING_DIR}/lib.sh"
@@ -31,13 +33,13 @@ main() {
   info "test_own_script: starting run, results -> ${RESULTS_DIR}"
   sep
 
-  if ! docker info >/dev/null 2>&1; then
+  if ! docker info > /dev/null 2>&1; then
     err_ "No access to the Docker daemon (check /var/run/docker.sock mount)"
     exit 1
   fi
 
   CREATED_VOLUME="cfgsrv-test-aptcache-$$"
-  docker volume create "$CREATED_VOLUME" >/dev/null
+  docker volume create "${CREATED_VOLUME}" > /dev/null
 
   info "Generating disposable test SSH keys (mktemp, never committed)..."
   generate_fixture_keys
@@ -52,14 +54,14 @@ main() {
   cleanup_fixture_keys
 
   sep
-  if [[ "$overall_rc" -eq 0 ]]; then
+  if [[ "${overall_rc}" -eq 0 ]]; then
     ok "All scenarios passed. Full report: ${RESULTS_DIR}/summary.md"
   else
     err_ "Some scenarios failed. Full report: ${RESULTS_DIR}/summary.md"
   fi
   sep
 
-  exit "$overall_rc"
+  exit "${overall_rc}"
 }
 
 main "$@"

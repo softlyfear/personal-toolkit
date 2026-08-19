@@ -9,7 +9,7 @@
 # jrei/systemd-ubuntu base does not ship it preinstalled — without it, wget's HTTPS
 # fetch of the real astral.sh uv installer fails with a certificate-trust error. Every
 # real cloud VPS image ships ca-certificates already; this is purely a minimal-image gap.
-ARG JREI_TAG=26.04
+ARG JREI_TAG=latest
 FROM jrei/systemd-ubuntu:${JREI_TAG}
 
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
