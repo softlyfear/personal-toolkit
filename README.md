@@ -10,8 +10,23 @@ Bash utilities for **Ubuntu** (latest LTS) — run from GitHub, no clone require
 my-script/
 ├── server-scripts/     # VPS hardening, updates, svcctl, xrdp
 ├── dev-tools/          # devsetup, FastAPI Makefile
+├── .claude/lint.sh     # quality gate: shfmt + shellcheck + bats
+├── .claude/testing/    # all tests: unit/ (bats) + Docker scenario suites
 └── web3/               # Cosmos, Ethereum nodes
 ```
+
+## Contributing
+
+Bash standards for this repository are fixed in [`RULES.md`](RULES.md). Before any change is
+considered done:
+
+```bash
+bash .claude/lint.sh    # shfmt -d, then shellcheck -x -S style, then bats .claude/testing/unit/
+```
+
+Requires `shfmt`, `shellcheck` and `bats`. Test layers and the list of things only a real
+VPS can verify are described in
+[`.claude/testing/unit/README.md`](.claude/testing/unit/README.md).
 
 ---
 

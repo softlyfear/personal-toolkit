@@ -3,15 +3,17 @@
 # install_sysupdate.sh test harness. Must run INSIDE the driver container with
 # /var/run/docker.sock mounted, mirroring .claude/testing/own-script/run.sh.
 set -euo pipefail
+IFS=$'\n\t'
 
 : "${HOST_REPO_PATH:?HOST_REPO_PATH is not set}"
 
 readonly TESTING_DIR="/work/repo/.claude/testing/sysupdate"
-readonly REPO_MOUNT_SRC="$HOST_REPO_PATH"
-readonly RESULTS_DIR="/work/results/$(date +%Y%m%d_%H%M%S)"
+readonly REPO_MOUNT_SRC="${HOST_REPO_PATH}"
+RESULTS_DIR="/work/results/$(date +%Y%m%d_%H%M%S)"
+readonly RESULTS_DIR
 readonly FULL_CLEAN="${FULL_CLEAN:-1}"
 
-mkdir -p "$RESULTS_DIR"
+mkdir -p "${RESULTS_DIR}"
 
 # shellcheck source=./lib.sh
 source "${TESTING_DIR}/lib.sh"
@@ -25,13 +27,13 @@ main() {
   info "test_sysupdate: starting run, results -> ${RESULTS_DIR}"
   sep
 
-  if ! docker info >/dev/null 2>&1; then
+  if ! docker info > /dev/null 2>&1; then
     err_ "No access to the Docker daemon (check /var/run/docker.sock mount)"
     exit 1
   fi
 
   CREATED_VOLUME="sysupdate-test-aptcache-$$"
-  docker volume create "$CREATED_VOLUME" >/dev/null
+  docker volume create "${CREATED_VOLUME}" > /dev/null
 
   run_all_scenarios
 
@@ -41,14 +43,14 @@ main() {
   set -e
 
   sep
-  if [[ "$overall_rc" -eq 0 ]]; then
+  if [[ "${overall_rc}" -eq 0 ]]; then
     ok "All scenarios passed. Full report: ${RESULTS_DIR}/summary.md"
   else
     err_ "Some scenarios failed. Full report: ${RESULTS_DIR}/summary.md"
   fi
   sep
 
-  exit "$overall_rc"
+  exit "${overall_rc}"
 }
 
 main "$@"

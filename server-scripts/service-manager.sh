@@ -9,7 +9,7 @@
 # Services: postgresql | docker (or aliases pg, postgres)
 #
 set -euo pipefail
-
+IFS=$'\n\t'
 
 # =============================================================================
 # Constants
@@ -17,16 +17,17 @@ set -euo pipefail
 
 readonly ALLOWED_SERVICES=("postgresql" "docker")
 
-
 # =============================================================================
 # UI helpers
 # =============================================================================
 
-info()  { echo -e "\033[35m[INFO]  $1\033[0m" >&2; }
-ok()    { echo -e "\033[32m[OK]    $1\033[0m" >&2; }
-warn()  { echo -e "\033[33m[WARN]  $1\033[0m" >&2; }
-err()   { echo -e "\033[31m[ERROR] $1\033[0m" >&2; exit 1; }
-
+info() { echo -e "\033[35m[INFO]  $1\033[0m" >&2; }
+ok() { echo -e "\033[32m[OK]    $1\033[0m" >&2; }
+warn() { echo -e "\033[33m[WARN]  $1\033[0m" >&2; }
+err() {
+  echo -e "\033[31m[ERROR] $1\033[0m" >&2
+  exit 1
+}
 
 # =============================================================================
 # Helpers
@@ -35,7 +36,7 @@ err()   { echo -e "\033[31m[ERROR] $1\033[0m" >&2; exit 1; }
 usage() {
   local cmd
   cmd="$(basename "$0")"
-  cat <<EOF
+  cat << EOF
 Usage:
   ${cmd} <start|stop|restart|enable|disable|status> <service...|all>
 
@@ -60,57 +61,74 @@ is_allowed() {
   local svc="$1"
   local allowed
   for allowed in "${ALLOWED_SERVICES[@]}"; do
-    [[ "$svc" == "$allowed" ]] && return 0
+    [[ "${svc}" == "${allowed}" ]] && return 0
   done
   return 1
 }
 
+# "${arr[*]}" would join on IFS, which starts with a newline here.
+join_spaces() {
+  local IFS=' '
+  printf '%s' "$*"
+}
 
 # =============================================================================
 # MAIN
 # =============================================================================
 
-if [[ $# -lt 2 ]]; then
-  usage
-  exit 1
-fi
+main() {
+  local action="" svc="" raw=""
+  local -a targets=()
 
-action="$1"
-shift
-
-case "$action" in
-  start | stop | restart | enable | disable | status) ;;
-  *) err "Invalid action: $action" ;;
-esac
-
-if ! command -v systemctl >/dev/null 2>&1; then
-  err "systemctl not found"
-fi
-
-targets=()
-if [[ "${1:-}" == "all" ]]; then
-  targets=("${ALLOWED_SERVICES[@]}")
-else
-  for raw in "$@"; do
-    svc="$(normalize_service "$raw")"
-    if ! is_allowed "$svc"; then
-      err "Service '$raw' not allowed. Allowed: ${ALLOWED_SERVICES[*]}"
-    fi
-    targets+=("$svc")
-  done
-fi
-
-SUDO=""
-if [[ "$(id -u)" -ne 0 ]]; then
-  SUDO="sudo"
-fi
-
-for svc in "${targets[@]}"; do
-  info "$action $svc"
-  if [[ "$action" == "status" ]]; then
-    $SUDO systemctl --no-pager status "$svc" || warn "Unable to read status for $svc"
-  else
-    $SUDO systemctl "$action" "$svc"
-    ok "$action completed for $svc"
+  if [[ $# -lt 2 ]]; then
+    usage
+    exit 1
   fi
-done
+
+  action="$1"
+  shift
+
+  case "${action}" in
+    start | stop | restart | enable | disable | status) ;;
+    *) err "Invalid action: ${action}" ;;
+  esac
+
+  if ! command -v systemctl > /dev/null 2>&1; then
+    err "systemctl not found"
+  fi
+
+  targets=()
+  if [[ "${1:-}" == "all" ]]; then
+    targets=("${ALLOWED_SERVICES[@]}")
+  else
+    for raw in "$@"; do
+      svc="$(normalize_service "${raw}")"
+      # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+      if ! is_allowed "${svc}"; then
+        # shellcheck disable=SC2312 # exit status of this substitution is intentionally unused here
+        err "Service '${raw}' not allowed. Allowed: $(join_spaces "${ALLOWED_SERVICES[@]}")"
+      fi
+      targets+=("${svc}")
+    done
+  fi
+
+  SUDO=""
+  # shellcheck disable=SC2312 # exit status of this substitution is intentionally unused here
+  if [[ "$(id -u)" -ne 0 ]]; then
+    SUDO="sudo"
+  fi
+
+  for svc in "${targets[@]}"; do
+    info "${action} ${svc}"
+    if [[ "${action}" == "status" ]]; then
+      ${SUDO} systemctl --no-pager status "${svc}" || warn "Unable to read status for ${svc}"
+    else
+      ${SUDO} systemctl "${action}" "${svc}"
+      ok "${action} completed for ${svc}"
+    fi
+  done
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  main "$@"
+fi

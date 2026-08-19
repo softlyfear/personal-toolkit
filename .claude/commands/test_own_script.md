@@ -118,7 +118,7 @@ without confirmation.
 
 ## Known limitations (say these out loud, don't stay quiet about them)
 
-- Ubuntu only (`jrei/systemd-ubuntu:26.04`) — Debian is intentionally not covered by this harness.
+- Ubuntu only (`jrei/systemd-ubuntu:latest`) — Debian is intentionally not covered by this harness.
 - 16 scenarios (`.claude/testing/own-script/scenarios.sh:run_all_scenarios`): 5 on argument parsing (`--help`,
   invalid port, unknown flag, `--user root`, missing `--password-file`) + 11 end-to-end with a full dialog —
   both auth modes, auto/manual password, fully interactive input with no presets, port 22 (edge case),
