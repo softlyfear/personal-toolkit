@@ -9,7 +9,9 @@ IFS=$'\n\t'
 
 readonly TESTING_DIR="/work/repo/.claude/testing/sysupdate"
 readonly REPO_MOUNT_SRC="${HOST_REPO_PATH}"
-RESULTS_DIR="/work/results/$(date +%Y%m%d_%H%M%S)"
+# Deliberately inside the container: scenario logs are working files, not artefacts,
+# and are discarded with the container instead of accumulating in the repo.
+RESULTS_DIR="/tmp/results/$(date +%Y%m%d_%H%M%S)"
 readonly RESULTS_DIR
 readonly FULL_CLEAN="${FULL_CLEAN:-1}"
 
@@ -22,9 +24,24 @@ source "${TESTING_DIR}/scenarios.sh"
 
 trap full_teardown EXIT
 
+# Scenario logs live only in this container, so anything a failure needs must be on
+# stderr before it exits.
+dump_failed_logs() {
+  local row id status note
+  for row in "${RESULTS_ROWS[@]}"; do
+    IFS='|' read -r id status note <<< "${row}"
+    if [[ "${status}" == "PASS" ]]; then
+      continue
+    fi
+    sep
+    err_ "${id} — tail of scenario log:"
+    tail -n 40 "${RESULTS_DIR}/${id}"*.log 2> /dev/null >&2 || true
+  done
+}
+
 main() {
   sep
-  info "test_sysupdate: starting run, results -> ${RESULTS_DIR}"
+  info "test_sysupdate: starting run"
   sep
 
   if ! docker info > /dev/null 2>&1; then
@@ -38,15 +55,16 @@ main() {
   run_all_scenarios
 
   set +e
-  print_summary | tee "${RESULTS_DIR}/summary.md" >&2
+  print_summary >&2
   local overall_rc=$?
   set -e
 
   sep
   if [[ "${overall_rc}" -eq 0 ]]; then
-    ok "All scenarios passed. Full report: ${RESULTS_DIR}/summary.md"
+    ok "All scenarios passed"
   else
-    err_ "Some scenarios failed. Full report: ${RESULTS_DIR}/summary.md"
+    dump_failed_logs
+    err_ "Some scenarios failed (logs above)"
   fi
   sep
 

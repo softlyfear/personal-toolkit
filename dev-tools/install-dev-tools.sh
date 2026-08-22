@@ -56,6 +56,12 @@ need_cmd() {
   command -v "$1" > /dev/null 2>&1
 }
 
+# -r /dev/tty passes with no controlling terminal too — the device node always exists.
+# Only an actual open distinguishes "piped, no tty" from a real terminal.
+tty_is_usable() {
+  { true < /dev/tty; } 2> /dev/null
+}
+
 # "${arr[*]}" would join on IFS, which starts with a newline here.
 join_spaces() {
   local IFS=' '
@@ -89,10 +95,6 @@ pick_interactive() {
   local selected=()
   local tool=""
   local ans=""
-
-  if [[ ! -r /dev/tty ]]; then
-    err "Interactive input requires a TTY. Download first: wget -qO /tmp/install-dev-tools.sh <raw-url> && bash /tmp/install-dev-tools.sh --interactive"
-  fi
 
   for tool in "${TOOLS[@]}"; do
     printf 'Install %s? [y/N]: ' "${tool}" >&2
@@ -202,6 +204,12 @@ main() {
       selected=("${TOOLS[@]}")
       ;;
     --interactive)
+      # Checked here, not in pick_interactive: that one runs in a process substitution,
+      # where err's exit would only kill the subshell and leave the script exiting 0.
+      # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+      if ! tty_is_usable; then
+        err "Interactive input requires a TTY. Download first: wget -qO /tmp/install-dev-tools.sh <raw-url> && bash /tmp/install-dev-tools.sh --interactive"
+      fi
       # shellcheck disable=SC2312 # pick_interactive writes the selection to stdout; a read failure is caught by the empty-selection check below
       while IFS= read -r line; do
         [[ -n "${line}" ]] && selected+=("${line}")
