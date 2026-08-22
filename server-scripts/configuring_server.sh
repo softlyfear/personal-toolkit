@@ -79,6 +79,10 @@ CLI_PRESET_PASSWORD=""
 CONFIRM_WINDOW_MIN=0
 PROVIDER_USER_CLEANUP_FAILED=false
 ROLLBACK_SYSCTL_UNIT_CREATED=false
+# Set once this script creates the account or grants it sudo — an account that merely
+# happened to exist must not be reported as something the rollback left behind.
+ROLLBACK_USER_MODIFIED=false
+NTP_SYNCHRONIZED=false
 
 # =============================================================================
 # UI: logging and final summary
@@ -163,7 +167,11 @@ print_final_summary() {
   sum_item "UFW" "enabled · only ${SSH_PORT}/tcp (limit) · logging on"
   sum_item "Fail2Ban" "sshd jail enabled"
   sum_line "Unattended upgrades enabled"
-  sum_line "NTP time synchronization enabled"
+  if [[ "${NTP_SYNCHRONIZED}" == "true" ]]; then
+    sum_line "NTP time synchronization enabled"
+  else
+    sum_note "NTP enabled, clock not synchronized yet — check: timedatectl show -p NTPSynchronized"
+  fi
   sum_line "Sysctl hardening (/etc/sysctl.d/98-hardening.conf)"
   sum_line "Journald log limits (SystemMaxUse=200M, MaxRetentionSec=14day)"
 
@@ -477,10 +485,14 @@ parse_cli_args() {
     case "$1" in
       --user | -u)
         [[ $# -ge 2 ]] || err "--user requires a value"
-        SSH_USER="$(sanitize_username_input "$2")"
-        [[ "${SSH_USER}" =~ ^[a-z_][a-z0-9_-]*$ ]] || err "Invalid --user: $2"
+        # Validated before SSH_USER is set: the rollback trap reports SSH_USER as an
+        # account it touched, and a rejected name must not show up there.
+        local candidate_user=""
+        candidate_user="$(sanitize_username_input "$2")"
+        [[ "${candidate_user}" =~ ^[a-z_][a-z0-9_-]*$ ]] || err "Invalid --user: $2"
         # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
-        is_reserved_username "${SSH_USER}" && err "--user root is not allowed — root login stays disabled by this script"
+        is_reserved_username "${candidate_user}" && err "--user root is not allowed — root login stays disabled by this script"
+        SSH_USER="${candidate_user}"
         shift 2
         ;;
       --password | -p)
@@ -860,6 +872,20 @@ record_failure_context() {
   fi
 }
 
+# The trap is armed at the top of main, so it also fires for failures that never got past
+# argument parsing. Announcing a rollback there claims work that was never done.
+rollback_has_state() {
+  [[ -n "${ROLLBACK_SSHD_BACKUP}" ]] && return 0
+  [[ "${SSH_SOCKET_MASKED}" == "true" || "${SSH_SOCKET_DISABLED}" == "true" ]] && return 0
+  [[ "${ROLLBACK_FAIL2BAN_TOUCHED}" == "true" ]] && return 0
+  [[ -n "${ROLLBACK_SUDOERS_BACKUP}" || "${ROLLBACK_SUDOERS_CREATED}" == "true" ]] && return 0
+  [[ "${ROLLBACK_SYSCTL_UNIT_CREATED}" == "true" ]] && return 0
+  [[ "${ROLLBACK_UFW_MODIFIED}" == "true" ]] && return 0
+  [[ "${ROLLBACK_AUTOREVERT_INSTALLED}" == "true" ]] && return 0
+  [[ "${ROLLBACK_USER_MODIFIED}" == "true" ]] && return 0
+  return 1
+}
+
 rollback_on_failure() {
   local exit_code=$?
   [[ "${exit_code}" -eq 0 || "${SCRIPT_SUCCEEDED}" == "true" ]] && return 0
@@ -870,6 +896,15 @@ rollback_on_failure() {
     # [ERROR] prefix without leaving the trap.
     echo -e "\033[31m[ERROR] Failed in ${ROLLBACK_FAIL_FUNC}() at line ${ROLLBACK_FAIL_LINE}\033[0m" >&2
   fi
+
+  # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+  if ! rollback_has_state; then
+    # Deliberately not "nothing changed": packages and NTP may already be configured by
+    # now. Only the surface this rollback covers is known to be untouched.
+    warn "Script failed (exit ${exit_code}). Nothing to roll back — SSH, sudo, UFW and Fail2Ban were not modified"
+    exit "${exit_code}"
+  fi
+
   warn "Script failed (exit ${exit_code}). Rolling back critical changes..."
 
   if [[ -n "${ROLLBACK_SSHD_BACKUP}" ]]; then
@@ -958,10 +993,10 @@ rollback_on_failure() {
     warn "Disarmed the auto-revert timer (the script already rolled itself back)"
   fi
 
-  # The account itself is never removed: the script does not track whether it created it,
-  # and deleting an operator's own user on an error path would be worse than the failure.
-  # Say what survived instead, so it is not discovered later by accident.
-  if [[ -n "${SSH_USER:-}" ]] && id "${SSH_USER}" > /dev/null 2>&1; then
+  # The account itself is never removed: deleting an operator's own user on an error path
+  # would be worse than the failure. Say what survived instead, so it is not discovered
+  # later by accident — but only for an account this run actually created or escalated.
+  if [[ "${ROLLBACK_USER_MODIFIED}" == "true" && -n "${SSH_USER:-}" ]] && id "${SSH_USER}" > /dev/null 2>&1; then
     warn "Left in place: user '${SSH_USER}' (group sudo, ~/.ssh/authorized_keys) — sudo needs a password it has none for; a re-run reuses this account"
   fi
 
@@ -1068,10 +1103,12 @@ ensure_sudo_user() {
     fi
     warn "User ${SSH_USER} already exists"
   else
+    ROLLBACK_USER_MODIFIED=true
     useradd -m -s /bin/bash "${SSH_USER}"
     ok "User ${SSH_USER} created"
   fi
 
+  ROLLBACK_USER_MODIFIED=true
   if getent group sudo > /dev/null; then
     usermod -aG sudo "${SSH_USER}"
     ok "User ${SSH_USER} added to sudo group"
@@ -1395,6 +1432,7 @@ enable_time_sync() {
     fi
     sleep 2
   done
+  NTP_SYNCHRONIZED="${ntp_synced}"
 
   if [[ "${ntp_synced}" != "true" ]]; then
     warn "NTP not synchronized yet (NTPSynchronized != yes); may sync shortly"
