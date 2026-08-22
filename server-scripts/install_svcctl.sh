@@ -17,7 +17,7 @@ readonly BIN_DIR="/usr/local/bin"
 readonly SOURCE_URL="${BASE_URL}/service-manager.sh"
 readonly TARGET_FILE="${BIN_DIR}/svcctl"
 # Update the checksum together with service-manager.sh.
-readonly EXPECTED_SHA256="0d08f1f06d594155f31631e9741764b40bf2ce90a645e3febccb19dee297b35b"
+readonly EXPECTED_SHA256="fb711db9ded716f88bf956e8860a5c02d14cc019f161915a3b44d3c74fcb653d"
 
 # =============================================================================
 # Script state

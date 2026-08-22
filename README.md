@@ -17,7 +17,7 @@ my-script/
 
 ## Contributing
 
-Bash standards for this repository are fixed in [`RULES.md`](RULES.md). Before any change is
+Bash standards for this repository are fixed in [`.claude/RULES.md`](.claude/RULES.md). Before any change is
 considered done:
 
 ```bash

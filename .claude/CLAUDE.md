@@ -169,9 +169,9 @@ points to preserve when modifying it:
   and optionally `alembic`/`docker compose` in the *target* project, not here. `PROJECT_NAME` is a placeholder
   (`<PROJECT_NAME>`) meant to be filled in by whoever copies it.
 
-## Quality gate: RULES.md + .claude/lint.sh
+## Quality gate: .claude/RULES.md + .claude/lint.sh
 
-**`RULES.md` at the repo root is binding for every Bash change here — read it before editing a
+**`.claude/RULES.md` is binding for every Bash change here — read it before editing a
 script.** It fixes the prologue (`set -euo pipefail` + `IFS=$'\n\t'`), quoting, `local`,
 stdout-vs-stderr, traps, naming, the suppression policy, and the tooling set (shellcheck, shfmt,
 bats-core, shellharden, checkbashisms — nothing else).
@@ -188,12 +188,12 @@ It executes, in this order and stopping at the first failure: `shfmt -i 2 -ci -b
 newly created script is checked before it is ever staged; `web3/` and the vendored
 `.claude/testing/unit/test_helper/` are excluded on purpose.
 
-**Comments: only what earns its place.** Rule 11 in `RULES.md`. A comment exists for a *why*
+**Comments: only what earns its place.** Rule 11 in `.claude/RULES.md`. A comment exists for a *why*
 the code can't show — a constraint, an ordering requirement, a trap that already caused a bug.
 Don't restate the line, don't narrate the change, don't leave notes about the work itself. One
 line where one line does. This applies to every file here, including the test harness.
 
-Two things that are easy to get wrong and are already documented in `RULES.md`:
+Two things that are easy to get wrong and are already documented in `.claude/RULES.md`:
 
 - **Suppressions.** Never global in `.shellcheckrc`. Per-line `# shellcheck disable=SCxxxx # reason`
   with the reason on the same line. ShellCheck rejects a directive in front of `elif`, a `case`
@@ -261,6 +261,11 @@ convention above.
 - Every scenario runs the full script to completion (or its natural error exit) inside a real target container —
   including argument-parsing scenarios that fail before touching any service, kept on the same image for
   consistency rather than a separate lightweight path.
+- Scenario logs are written to `/tmp/results/<ts>/` **inside the driver container** and die with it. Nothing
+  is mounted writable from the host: the user does not read these logs and asked that they stop accumulating
+  in the repo. Don't reintroduce a `results/` mount, a `results/` directory, or a `.gitignore` entry for one —
+  the summary table and, on failure, the tail of each failing scenario's log (`dump_failed_logs` in `run.sh`)
+  go to stderr, which is the only report there is.
 - Cleanup: each scenario's container+image are removed right after that scenario (`cleanup_scenario`); the
   shared base layers, apt-cache volume, and driver image are removed at the end via `trap full_teardown EXIT`
   (fires on normal completion, error, or Ctrl-C) so nothing accumulates on the host. Never points at a real SSH

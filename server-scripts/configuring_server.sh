@@ -213,8 +213,15 @@ print_final_summary() {
 # Interactive input (TTY)
 # =============================================================================
 
+# -r /dev/tty passes with no controlling terminal too — the device node always exists.
+# Only an actual open distinguishes "piped, no tty" from a real terminal.
+tty_is_usable() {
+  { true < /dev/tty; } 2> /dev/null
+}
+
 read_tty() {
-  if [[ ! -r /dev/tty ]]; then
+  # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+  if ! tty_is_usable; then
     err "Interactive input requires a TTY. Download first: wget -qO /tmp/setup.sh ${SCRIPT_RAW_URL} && bash /tmp/setup.sh"
   fi
   IFS= read -r "$1" < /dev/tty
@@ -392,7 +399,8 @@ prompt_set_password() {
   local max_attempts=5
   local attempt=1
 
-  if [[ ! -r /dev/tty ]]; then
+  # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+  if ! tty_is_usable; then
     err "Password input requires a TTY. Download first: wget -qO /tmp/setup.sh ${SCRIPT_RAW_URL} && bash /tmp/setup.sh"
   fi
 
@@ -762,7 +770,13 @@ handle_ssh_socket() {
     SSH_SOCKET_DISABLED=true
   fi
 
-  if systemctl is-enabled ssh.socket 2> /dev/null | grep -q '^masked$'; then
+  # Read into a variable rather than piping: `systemctl is-enabled` exits 1 for a masked
+  # unit, and under pipefail that sinks the whole `| grep -q` test. The guard then never
+  # fires, an already-masked socket gets masked again, and the rollback later unmasks a
+  # unit this run never touched.
+  local socket_state=""
+  socket_state="$(systemctl is-enabled ssh.socket 2> /dev/null || true)"
+  if [[ "${socket_state}" == "masked" ]]; then
     return 0
   fi
 
@@ -1737,13 +1751,19 @@ EOF
   backup_ufw_config
   ROLLBACK_UFW_MODIFIED=true
 
+  # Open the new port first. On a host where UFW is already active — the state
+  # add_*_xrdp.sh leaves behind — `default deny incoming` takes effect the moment it
+  # runs, and sshd has already moved off the old port by now. Opening afterwards
+  # would black-hole every new connection across the prompt in
+  # ufw_enforce_single_open_port, which waits for an operator who may no longer
+  # be able to reach the box.
+  # shellcheck disable=SC2310 # returns 1 when the rule already exists — a normal re-run, not a failure
+  ufw_limit_port_once "${SSH_PORT}/tcp" || true
+
   ufw default deny incoming
   ufw default allow outgoing
 
   ufw_enforce_single_open_port "${SSH_PORT}"
-
-  # shellcheck disable=SC2310 # returns 1 when the rule already exists — a normal re-run, not a failure
-  ufw_limit_port_once "${SSH_PORT}/tcp" || true
 
   ufw logging on
   ufw --force enable

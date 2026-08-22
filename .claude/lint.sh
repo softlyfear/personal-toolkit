@@ -3,7 +3,7 @@
 # lint.sh — the repository's quality gate: formatting, static analysis, unit tests.
 #
 # Usage:  bash .claude/lint.sh
-# Requires: shfmt, shellcheck, bats (see RULES.md "Tooling")
+# Requires: shfmt, shellcheck, bats (see .claude/RULES.md "Tooling")
 #
 # Runs strictly in this order and stops at the first failure:
 #   1. shfmt -d                  formatting differences
@@ -55,7 +55,7 @@ require_tools() {
   for tool in "$@"; do
     # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
     if ! need_cmd "${tool}"; then
-      err "Required tool not found: ${tool} (see RULES.md \"Tooling\")"
+      err "Required tool not found: ${tool} (see .claude/RULES.md \"Tooling\")"
     fi
   done
 }

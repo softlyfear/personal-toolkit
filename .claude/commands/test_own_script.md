@@ -1,7 +1,7 @@
 ---
 description: Run server-scripts/configuring_server.sh through a matrix of Docker scenarios (systemd containers + expect automation of the /dev/tty dialog), with guaranteed image/container cleanup after every scenario and a full cleanup at the end.
 argument-hint: (no arguments — just /test_own_script)
-allowed-tools: Bash(docker build:*), Bash(docker run:*), Bash(docker rm:*), Bash(docker rmi:*), Bash(docker images:*), Bash(docker volume:*), Bash(docker ps:*), Bash(docker info:*), Bash(mkdir:*), Bash(git rev-parse:*), Read, Glob
+allowed-tools: Bash(docker build:*), Bash(docker run:*), Bash(docker rm:*), Bash(docker rmi:*), Bash(docker images:*), Bash(docker volume:*), Bash(docker ps:*), Bash(docker info:*), Bash(git rev-parse:*), Read
 ---
 
 # Run configuring_server.sh scenarios through Docker
@@ -55,17 +55,18 @@ one scenario only — the run that answers "does this change pass" must be unfil
 Use the Bash tool (not `!`, since output can be long and needs interpreting):
 
 ```bash
-mkdir -p .claude/testing/own-script/results
 MSYS_NO_PATHCONV=1 docker run --rm \
   -e HOST_REPO_PATH="$(pwd)" \
   -e FULL_CLEAN=1 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(pwd):/work/repo:ro" \
-  -v "$(pwd)/.claude/testing/own-script/results:/work/results" \
   cfgsrv-test-driver bash /work/repo/.claude/testing/own-script/run.sh
 ```
 
-`/work/repo` is read-only (see above) — results need their own writable mount, kept separate from the source tree.
+`/work/repo` is read-only and nothing is mounted writable: scenario logs stay inside the container under
+`/tmp/results` and die with it. **Don't add a results mount back** — the user does not read these logs and
+does not want them accumulating in the repo. Everything needed to judge the run is on stderr: the summary
+table always, plus the tail of each failing scenario's log (`dump_failed_logs` in `run.sh`).
 
 Works unchanged on both Windows (Docker Desktop) and native Ubuntu (Docker Engine) — the user works on this
 repo from both. `MSYS_NO_PATHCONV=1` only matters under Git Bash (disables its path-mangling of `-v`
@@ -86,17 +87,17 @@ including Ctrl-C) and in Step 4 of this command.
 
 ## Step 3 — Read the results
 
-1. Read the summary file: the latest directory under `.claude/testing/own-script/results/*/summary.md` (Glob +
-   Read).
+1. Take the summary table from the run's own output (the harness prints it to stderr) — there is no file to
+   read, and none should be created.
 2. Present the user a table shaped like:
 
    | Scenario | Result | Note |
    |---|---|---|
 
 3. If something failed — don't try to fix `configuring_server.sh` yourself as part of this command. Show which
-   scenario and which check failed (note + path to
-   `.claude/testing/own-script/results/<ts>/<ID>.log`), and ask the user whether to fix it now (a separate
-   step — Изменение) or whether it's expected.
+   scenario and which check failed, quoting the relevant lines from the failing scenario's log tail that the
+   harness already printed, and ask the user whether to fix it now (a separate step — Изменение) or whether
+   it's expected.
 4. Give one-sentence overall verdict: all scenarios passed / there are issues (which ones) / the run didn't
    finish (technical reason — Docker unavailable, the jrei/systemd-ubuntu tag not found, an expect timeout,
    etc.).

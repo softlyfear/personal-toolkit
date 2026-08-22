@@ -43,6 +43,13 @@ setup_sudo() {
   fi
 }
 
+require_tty() {
+  # -r /dev/tty passes with no controlling terminal too — the device node always exists.
+  # Only an actual open distinguishes "piped, no tty" from a real terminal.
+  { true < /dev/tty; } 2> /dev/null \
+    || err "This script prompts for a username and password: run it from a terminal, not a pipe"
+}
+
 wait_for_dpkg_lock() {
   command -v fuser > /dev/null 2>&1 || return 0
   local waited=0
@@ -84,6 +91,14 @@ prompt_new_user() {
     read -r raw < /dev/tty
     raw="$(printf '%s' "${raw}" | LC_ALL=C tr -cd '[:alnum:]_-' | tr '[:upper:]' '[:lower:]')"
     NEW_USER="${raw:-admin}"
+
+    # This script denies root in PAM_XRDP_SESMAN; accepting it here would configure
+    # a desktop session that is guaranteed to be refused at login.
+    if [[ "${NEW_USER}" == "root" ]]; then
+      warn "Username 'root' is rejected: this script disables root xrdp login (try again ${attempt}/${max_attempts})"
+      ((attempt++)) || true
+      continue
+    fi
 
     if [[ "${NEW_USER}" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
       return 0
@@ -177,6 +192,7 @@ disable_root_xrdp_login() {
 main() {
   setup_sudo
   require_apt_based_distro
+  require_tty
 
   export DEBIAN_FRONTEND=noninteractive
   export APT_LISTCHANGES_FRONTEND=none
