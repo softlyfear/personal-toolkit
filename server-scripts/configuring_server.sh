@@ -1023,7 +1023,14 @@ rollback_on_failure() {
   # would be worse than the failure. Say what survived instead, so it is not discovered
   # later by accident — but only for an account this run actually created or escalated.
   if [[ "${ROLLBACK_USER_MODIFIED}" == "true" && -n "${SSH_USER:-}" ]] && id "${SSH_USER}" > /dev/null 2>&1; then
-    warn "Left in place: user '${SSH_USER}' (group sudo, ~/.ssh/authorized_keys) — sudo needs a password it has none for; a re-run reuses this account"
+    # set_user_password() (NOPASSWD-disabled path, or NOPASSWD-enabled with
+    # --password/--password-file) already ran and left a real password behind — say
+    # where to find it instead of wrongly claiming the account has none.
+    if [[ -n "${SSH_USER_PASSWORD:-}" ]]; then
+      warn "Left in place: user '${SSH_USER}' (group sudo, ~/.ssh/authorized_keys) — a password was already set, see ${CREDENTIALS_FILE:-/root/.${SSH_USER}-credentials}; a re-run reuses this account"
+    else
+      warn "Left in place: user '${SSH_USER}' (group sudo, ~/.ssh/authorized_keys) — sudo needs a password it has none for; a re-run reuses this account"
+    fi
   fi
 
   exit "${exit_code}"
