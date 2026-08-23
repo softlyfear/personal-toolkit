@@ -63,8 +63,10 @@ verify_common_hardening() {
     "docker exec ${name} test -s /etc/ssh/sshd_config.d/00-hardening.conf" || rc=1
   assert_shell "legacy sshd 99-hardening.conf removed" \
     "! docker exec ${name} test -e /etc/ssh/sshd_config.d/99-hardening.conf" || rc=1
-  assert_shell "sshd_config backup created" \
-    "docker exec ${name} bash -c 'ls /etc/ssh/sshd_config.bak_* >/dev/null 2>&1'" || rc=1
+  # discard_sshd_backup() removes sshd_config.bak_* on success, mirroring discard_ufw_backup() —
+  # only the rollback path reads it, so it must not survive a clean run.
+  assert_shell "no sshd_config rollback backup left behind after success" \
+    "! docker exec ${name} bash -c 'ls /etc/ssh/sshd_config.bak_* >/dev/null 2>&1'" || rc=1
   assert_match "effective port ${port}" "${cfg}" "^port ${port}$" || rc=1
   assert_match "effective AllowUsers ${user}" "${cfg}" "^allowusers ${user}$" || rc=1
   assert_match "PermitRootLogin no" "${cfg}" '^permitrootlogin no$' || rc=1
