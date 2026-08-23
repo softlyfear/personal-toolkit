@@ -77,6 +77,7 @@ SYSCTL_LOG=""
 SSH_USER_PASSWORD=""
 CREDENTIALS_FILE=""
 CLI_PRESET_PASSWORD=""
+CLI_PRESET_PASSWORD_FLAG=""
 CONFIRM_WINDOW_MIN=0
 PROVIDER_USER_CLEANUP_FAILED=false
 ROLLBACK_SYSCTL_UNIT_CREATED=false
@@ -438,7 +439,7 @@ setup_user_password() {
 
   if [[ -n "${CLI_PRESET_PASSWORD}" ]]; then
     set_user_password "${user}" "${CLI_PRESET_PASSWORD}"
-    ok "Password set for ${user} (from --password)"
+    ok "Password set for ${user} (from ${CLI_PRESET_PASSWORD_FLAG})"
     return 0
   fi
 
@@ -511,6 +512,7 @@ parse_cli_args() {
       --password | -p)
         [[ $# -ge 2 ]] || err "--password requires a value"
         CLI_PRESET_PASSWORD="$2"
+        CLI_PRESET_PASSWORD_FLAG="--password"
         warn "--password exposes the value via 'ps'/'/proc/<pid>/cmdline' while this script runs — prefer --password-file for automation"
         shift 2
         ;;
@@ -523,6 +525,7 @@ parse_cli_args() {
         CLI_PRESET_PASSWORD="$(head -n1 -- "$2")"
         CLI_PRESET_PASSWORD="${CLI_PRESET_PASSWORD%$'\r'}"
         [[ -n "${CLI_PRESET_PASSWORD}" ]] || err "--password-file is empty: $2"
+        CLI_PRESET_PASSWORD_FLAG="--password-file"
         shift 2
         ;;
       --confirm-window)
@@ -1738,7 +1741,7 @@ main() {
   info "Server hardening script started"
   info "SSH port target: ${SSH_PORT}/tcp (both modes; UFW opens this port only)"
   [[ -n "${SSH_USER:-}" ]] && info "Preset username: ${SSH_USER}"
-  [[ -n "${CLI_PRESET_PASSWORD}" ]] && info "Preset password: provided via --password"
+  [[ -n "${CLI_PRESET_PASSWORD}" ]] && info "Preset password: provided via ${CLI_PRESET_PASSWORD_FLAG}"
   sep
 
   # --- Step 1: system update ---
