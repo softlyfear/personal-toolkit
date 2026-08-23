@@ -39,8 +39,9 @@ dump_failed_logs() {
       continue
     fi
     sep
-    err_ "${id} — tail of scenario log:"
-    tail -n 40 "${RESULTS_DIR}/${id}"*.log 2> /dev/null >&2 || true
+    err_ "${id} — [ERROR] lines from scenario log (verify assertions can bury a single"
+    err_ "failure under dozens of later OK lines, so tail alone loses it):"
+    grep -n '\[ERROR\]' "${RESULTS_DIR}/${id}"*.log >&2 2> /dev/null || true
   done
 }
 

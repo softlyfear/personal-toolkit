@@ -948,6 +948,9 @@ rollback_on_failure() {
       fi
     fi
   fi
+  # Consumed above; leaving these behind would pile up sshd_config.bak_* on every
+  # failed+rolled-back run, same class of bug as the UFW backup (see discard_ufw_backup).
+  discard_sshd_backup
 
   if [[ "${SSH_SOCKET_MASKED}" == "true" || "${SSH_SOCKET_DISABLED}" == "true" ]]; then
     systemctl unmask ssh.socket > /dev/null 2>&1 || true
@@ -975,6 +978,8 @@ rollback_on_failure() {
       systemctl restart fail2ban > /dev/null 2>&1 || true
       warn "Removed newly created /etc/fail2ban/jail.local"
     fi
+    # Same reasoning as discard_sshd_backup: only this rollback reads it.
+    [[ -n "${ROLLBACK_FAIL2BAN_BACKUP}" ]] && rm -f "${ROLLBACK_FAIL2BAN_BACKUP}"
   fi
 
   local sudoers_file="/etc/sudoers.d/${SSH_USER:-}"
@@ -985,6 +990,8 @@ rollback_on_failure() {
     rm -f "${sudoers_file}"
     warn "Removed ${sudoers_file}"
   fi
+  # Same reasoning as discard_sshd_backup: only this rollback reads it.
+  [[ -n "${ROLLBACK_SUDOERS_BACKUP}" ]] && rm -f "${ROLLBACK_SUDOERS_BACKUP}"
 
   if [[ "${ROLLBACK_SYSCTL_UNIT_CREATED}" == "true" ]]; then
     systemctl disable sysctl-hardening.service > /dev/null 2>&1 || true
