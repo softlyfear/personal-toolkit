@@ -8,7 +8,7 @@
 # After setup, wait for sync (may take 1–2 hours). Verify with commands at the bottom.
 #
 set -euo pipefail
-
+IFS=$'\n\t'
 
 # =============================================================================
 # Constants
@@ -30,40 +30,55 @@ readonly PRYSM_SCRIPT_COMMIT="ea3fbe48b48170e7f7252fbc15e9591d462a0f87"
 readonly PRYSM_SCRIPT_URL="https://raw.githubusercontent.com/OffchainLabs/prysm/${PRYSM_SCRIPT_COMMIT}/prysm.sh"
 readonly PRYSM_SCRIPT_SHA256="7beb6fc967380d1a82bd88921960c8d02f5321867a05aebf4222a5b600e7dbac"
 
-
 # =============================================================================
 # UI helpers
 # =============================================================================
 
-info()  { echo -e "\033[35m[INFO]  $1\033[0m" >&2; }
-ok()    { echo -e "\033[32m[OK]    $1\033[0m" >&2; }
-warn()  { echo -e "\033[33m[WARN]  $1\033[0m" >&2; }
-err()   { echo -e "\033[31m[ERROR] $1\033[0m" >&2; exit 1; }
-
+info() { echo -e "\033[35m[INFO]  $1\033[0m" >&2; }
+ok() { echo -e "\033[32m[OK]    $1\033[0m" >&2; }
+warn() { echo -e "\033[33m[WARN]  $1\033[0m" >&2; }
+err() {
+  echo -e "\033[31m[ERROR] $1\033[0m" >&2
+  exit 1
+}
 
 # =============================================================================
 # Helpers
 # =============================================================================
 
 SUDO=""
+# shellcheck disable=SC2312 # exit status of this substitution is intentionally unused here
 if [[ "$(id -u)" -ne 0 ]]; then
-  if ! command -v sudo >/dev/null 2>&1; then
+  if ! command -v sudo > /dev/null 2>&1; then
     err "sudo is required when running as non-root user"
   fi
   SUDO="sudo"
 fi
+
+wait_for_dpkg_lock() {
+  command -v fuser > /dev/null 2>&1 || return 0
+  local waited=0
+  while ${SUDO} fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock > /dev/null 2>&1; do
+    ((waited == 0)) && info "Waiting for apt/dpkg lock (unattended-upgrades?)..."
+    ((waited >= 300)) && {
+      warn "dpkg lock still held after 300s — proceeding anyway"
+      return 0
+    }
+    sleep 5
+    ((waited += 5))
+  done
+}
 
 verify_sha256() {
   local file="$1"
   local expected="$2"
   local actual=""
 
-  [[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || err "Invalid expected SHA256 for $file"
-  actual="$(sha256sum "$file" | awk '{print $1}')"
-  [[ "$actual" == "$expected" ]] || err "SHA256 mismatch for $file"
-  ok "SHA256 verified: $(basename "$file")"
+  [[ "${expected}" =~ ^[[:xdigit:]]{64}$ ]] || err "Invalid expected SHA256 for ${file}"
+  actual="$(sha256sum "${file}" | awk '{print $1}')"
+  [[ "${actual}" == "${expected}" ]] || err "SHA256 mismatch for ${file}"
+  ok "SHA256 verified: $(basename "${file}")"
 }
-
 
 # =============================================================================
 # MAIN
@@ -71,17 +86,21 @@ verify_sha256() {
 
 # --- Step 1: system packages ---
 info "Updating system packages..."
-$SUDO apt-get update
-$SUDO apt-get upgrade -y
+wait_for_dpkg_lock
+${SUDO} apt-get update
+wait_for_dpkg_lock
+${SUDO} apt-get upgrade -y
 
 info "Installing build dependencies..."
-$SUDO apt-get install -y coreutils curl iptables build-essential \
+wait_for_dpkg_lock
+${SUDO} apt-get install -y coreutils curl iptables build-essential \
   git wget lz4 jq make gcc nano automake autoconf tmux htop \
   nvme-cli libgbm1 pkg-config libssl-dev libleveldb-dev tar \
   clang bsdmainutils ncdu unzip gnupg openssl
 
 info "Removing unused packages..."
-$SUDO apt-get autoremove -y
+wait_for_dpkg_lock
+${SUDO} apt-get autoremove -y
 ok "System packages ready"
 
 # --- Step 2: geth binary (pinned version in /usr/local/bin) ---
@@ -89,46 +108,68 @@ info "Downloading geth ${GETH_VERSION}..."
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 wget -q "${GETH_URL}" -O "${tmpdir}/${GETH_ARCHIVE}"
-verify_sha256 "${tmpdir}/${GETH_ARCHIVE}" "$GETH_ARCHIVE_SHA256"
-tar -xf "${tmpdir}/${GETH_ARCHIVE}" -C "$tmpdir"
-$SUDO install -m 755 "${tmpdir}/geth-linux-amd64-${GETH_VERSION}/geth" "$GETH_BIN"
-command -v "$GETH_BIN" >/dev/null || err "geth not found at $GETH_BIN"
-ok "geth installed: $($GETH_BIN version | head -1)"
+verify_sha256 "${tmpdir}/${GETH_ARCHIVE}" "${GETH_ARCHIVE_SHA256}"
+tar -xf "${tmpdir}/${GETH_ARCHIVE}" -C "${tmpdir}"
+${SUDO} install -m 755 "${tmpdir}/geth-linux-amd64-${GETH_VERSION}/geth" "${GETH_BIN}"
+command -v "${GETH_BIN}" > /dev/null || err "geth not found at ${GETH_BIN}"
+# shellcheck disable=SC2312 # version output is cosmetic; a failure here is caught by the check above
+ok "geth installed: $(${GETH_BIN} version | head -1)"
 
 # --- Step 3: data dirs and JWT secret ---
-$SUDO groupadd --system "$NODE_GROUP" 2>/dev/null || true
-$SUDO useradd --system --gid "$NODE_GROUP" --home-dir "$NODE_HOME" --create-home --shell /usr/sbin/nologin "$NODE_USER" 2>/dev/null || true
-$SUDO install -d -m 750 -o "$NODE_USER" -g "$NODE_GROUP" "${GETH_DATA}"
-$SUDO install -d -m 750 -o "$NODE_USER" -g "$NODE_GROUP" "${BEACON_HOME}/bin" "${BEACON_HOME}/data"
-$SUDO mkdir -p /var/lib/secrets
+${SUDO} groupadd --system "${NODE_GROUP}" 2> /dev/null || true
+${SUDO} useradd --system --gid "${NODE_GROUP}" --home-dir "${NODE_HOME}" --create-home --shell /usr/sbin/nologin "${NODE_USER}" 2> /dev/null || true
+${SUDO} install -d -m 750 -o "${NODE_USER}" -g "${NODE_GROUP}" "${GETH_DATA}"
+${SUDO} install -d -m 750 -o "${NODE_USER}" -g "${NODE_GROUP}" "${BEACON_HOME}/bin" "${BEACON_HOME}/data"
+${SUDO} mkdir -p /var/lib/secrets
 if [[ ! -f "${JWT_SECRET}" ]]; then
-  openssl rand -hex 32 | tr -d '\n' | $SUDO tee "${JWT_SECRET}" >/dev/null
-  $SUDO chmod 600 "${JWT_SECRET}"
+  openssl rand -hex 32 | tr -d '\n' | ${SUDO} tee "${JWT_SECRET}" > /dev/null
+  ${SUDO} chmod 600 "${JWT_SECRET}"
 fi
-$SUDO chown "$NODE_USER:$NODE_GROUP" "${JWT_SECRET}"
+${SUDO} chown "${NODE_USER}:${NODE_GROUP}" "${JWT_SECRET}"
 ok "Data directories and JWT secret ready"
 
 # --- Step 4: UFW ---
 # Restrict by source IP for better security:
 #   sudo ufw allow from <YOUR_PC_IP> to any port <PORT>
 info "Configuring UFW..."
-$SUDO apt-get install -y ufw
-ssh_port="22"
-if command -v sshd >/dev/null 2>&1; then
-  ssh_port="$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')"
+wait_for_dpkg_lock
+${SUDO} apt-get install -y ufw
+ssh_port="${SSH_PORT:-}"
+if [[ -z "${ssh_port}" && -n "${SSH_CONNECTION:-}" ]]; then
+  IFS=' ' read -r -a ssh_conn <<< "${SSH_CONNECTION}"
+  ssh_port="${ssh_conn[3]:-}"
 fi
-ssh_port="${ssh_port:-22}"
-$SUDO ufw allow 30303/tcp
-$SUDO ufw allow 30303/udp
-$SUDO ufw allow 12000/udp
-$SUDO ufw allow 13000/tcp
-$SUDO ufw allow "${ssh_port}/tcp"
-$SUDO ufw --force enable
+if [[ -z "${ssh_port}" ]]; then
+  # sshd needs root to read the host keys, and /usr/sbin is usually off a non-root
+  # PATH — without both of these a sudo run silently falls back to 22 and the real
+  # SSH port is left closed by the enable below.
+  sshd_bin=""
+  if command -v sshd > /dev/null 2>&1; then
+    sshd_bin="$(command -v sshd)"
+  elif [[ -x /usr/sbin/sshd ]]; then
+    sshd_bin="/usr/sbin/sshd"
+  fi
+  if [[ -n "${sshd_bin}" ]]; then
+    ssh_port="$({ ${SUDO} "${sshd_bin}" -T 2> /dev/null || true; } | awk '/^port /{print $2; exit}')"
+  fi
+fi
+if ! [[ "${ssh_port}" =~ ^[0-9]+$ ]] || ! ((ssh_port >= 1 && ssh_port <= 65535)); then
+  err "Could not determine the SSH port; set it explicitly: SSH_PORT=<port> bash $0"
+fi
+ok "SSH port detected: ${ssh_port}/tcp"
+
+${SUDO} ufw allow 30303/tcp
+${SUDO} ufw allow 30303/udp
+${SUDO} ufw allow 12000/udp
+${SUDO} ufw allow 13000/tcp
+${SUDO} ufw allow "${ssh_port}/tcp"
+printf '%s\n' "⚠️ RISK: enabling UFW with a wrong SSH rule locks out remote access. Rollback: use an already-open SSH session or the provider's console and run sudo ufw disable." >&2
+${SUDO} ufw --force enable
 ok "UFW enabled"
 
 # --- Step 5: geth systemd unit ---
 info "Creating geth.service..."
-$SUDO tee /etc/systemd/system/geth.service > /dev/null <<EOF
+${SUDO} tee /etc/systemd/system/geth.service > /dev/null << EOF
 [Unit]
 Description=Geth
 After=network-online.target
@@ -157,9 +198,9 @@ ExecStart=${GETH_BIN} \\
 WantedBy=multi-user.target
 EOF
 
-$SUDO systemctl daemon-reload
-$SUDO systemctl enable geth
-$SUDO systemctl restart geth
+${SUDO} systemctl daemon-reload
+${SUDO} systemctl enable geth
+${SUDO} systemctl restart geth
 ok "geth service started"
 
 warn "Wait for geth log: 'Post-merge network, but no beacon client seen' — then beacon starts below"
@@ -172,12 +213,12 @@ info "Check geth logs: journalctl -f -n 100 -u geth -o cat"
 # via Environment=USE_PRYSM_VERSION in the unit file below.
 info "Installing Prysm beacon..."
 wget -qO "${tmpdir}/prysm.sh" "${PRYSM_SCRIPT_URL}"
-verify_sha256 "${tmpdir}/prysm.sh" "$PRYSM_SCRIPT_SHA256"
-$SUDO install -m 750 -o "$NODE_USER" -g "$NODE_GROUP" \
+verify_sha256 "${tmpdir}/prysm.sh" "${PRYSM_SCRIPT_SHA256}"
+${SUDO} install -m 750 -o "${NODE_USER}" -g "${NODE_GROUP}" \
   "${tmpdir}/prysm.sh" "${BEACON_HOME}/bin/prysm.sh"
 
 info "Creating beacon.service..."
-$SUDO tee /etc/systemd/system/beacon.service > /dev/null <<EOF
+${SUDO} tee /etc/systemd/system/beacon.service > /dev/null << EOF
 [Unit]
 Description=Prysm Beacon
 After=network-online.target
@@ -207,9 +248,9 @@ ExecStart=${BEACON_HOME}/bin/prysm.sh beacon-chain \\
 WantedBy=multi-user.target
 EOF
 
-$SUDO systemctl daemon-reload
-$SUDO systemctl enable beacon
-$SUDO systemctl restart beacon
+${SUDO} systemctl daemon-reload
+${SUDO} systemctl enable beacon
+${SUDO} systemctl restart beacon
 ok "beacon service started"
 
 # --- Step 7: verification hints ---

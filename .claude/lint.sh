@@ -66,12 +66,11 @@ require_tools() {
 # silently skip any newly added script until someone remembered to `git add` it — exactly
 # when review matters most. --exclude-standard keeps .gitignore'd paths out.
 #
-# Two exclusions, both deliberate:
-#   web3/             unmaintained and explicitly out of scope (see .claude/CLAUDE.md)
-#   .claude/testing/unit/test_helper/  vendored bats-support/bats-assert — not our code
+# One exclusion, deliberate: .claude/testing/unit/test_helper/ is vendored
+# bats-support/bats-assert — not our code. web3/ stays unmaintained for feature work
+# (see .claude/CLAUDE.md) but is held to the same formatting and static analysis.
 shell_files() {
   git ls-files -z --cached --others --exclude-standard '*.sh' '*.bash' \
-    | grep -zv '^web3/' \
     | grep -zv '^\.claude/testing/unit/test_helper/' \
     | sort -zu
 }
