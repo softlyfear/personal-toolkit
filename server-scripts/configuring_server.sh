@@ -1878,6 +1878,18 @@ EOF
     warn "Some sysctl settings may not have applied; see ${SYSCTL_LOG}"
   fi
 
+  # `sysctl --system` reads /etc/sysctl.conf last, giving it the highest precedence per
+  # sysctl(8) — it can silently override 98-hardening.conf. Reproduced live: a VPS image
+  # shipped /etc/sysctl.conf with tcp_syncookies=0 for BBR tuning, which won over our =1.
+  # Re-apply our file last so it always wins, then verify the effective value rather than
+  # trust the write (same reasoning as verify_sshd_port / verify_ssh_ipv4_only).
+  sysctl -p /etc/sysctl.d/98-hardening.conf >> "${SYSCTL_LOG}" 2>&1 || true
+  local effective_syncookies
+  effective_syncookies="$(sysctl -n net.ipv4.tcp_syncookies)"
+  if [[ "${effective_syncookies}" != "1" ]]; then
+    warn "net.ipv4.tcp_syncookies is not 1 after hardening — check ${SYSCTL_LOG}"
+  fi
+
   install_sysctl_reapply_unit
 
   # --- Step 8: journald and cron/at ---
