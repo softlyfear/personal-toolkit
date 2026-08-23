@@ -72,7 +72,7 @@ Works unchanged on both Windows (Docker Desktop) and native Ubuntu (Docker Engin
 repo from both. `MSYS_NO_PATHCONV=1` only matters under Git Bash (disables its path-mangling of `-v`
 arguments); it's a harmless no-op on native Linux, so don't drop it or make it conditional.
 
-Run it in the background (`run_in_background: true`) — all 16 scenarios run the script to completion, including
+Run it in the background (`run_in_background: true`) — all 22 scenarios run the script to completion, including
 a real `apt-get update/upgrade` in every systemd container, which can take 20-40+ minutes depending on network
 speed (a shared apt cache across scenarios helps a bit but doesn't remove the cost). Don't sleep-poll — wait for
 the background-completion notification.
@@ -96,7 +96,7 @@ including Ctrl-C) and in Step 4 of this command.
 
 3. If something failed — don't try to fix `configuring_server.sh` yourself as part of this command. Show which
    scenario and which check failed, quoting the relevant lines from the failing scenario's log tail that the
-   harness already printed, and ask the user whether to fix it now (a separate step — Изменение) or whether
+   harness already printed, and ask the user whether to fix it now (a separate change) or whether
    it's expected.
 4. Give one-sentence overall verdict: all scenarios passed / there are issues (which ones) / the run didn't
    finish (technical reason — Docker unavailable, the jrei/systemd-ubuntu tag not found, an expect timeout,
@@ -124,8 +124,8 @@ without confirmation.
 ## Known limitations (say these out loud, don't stay quiet about them)
 
 - Ubuntu only (`jrei/systemd-ubuntu:latest`) — no other distribution is in scope for this harness.
-- 23 scenarios (`.claude/testing/own-script/scenarios.sh:run_all_scenarios`): 5 on argument parsing (`--help`,
-  invalid port, unknown flag, `--user root`, missing `--password-file`) + 18 end-to-end with a full dialog —
+- 22 scenarios (`.claude/testing/own-script/scenarios.sh:run_all_scenarios`): 5 on argument parsing (`--help`,
+  invalid port, unknown flag, `--user root`, missing `--password-file`) + 17 end-to-end with a full dialog —
   both auth modes, auto/manual password, fully interactive input with no presets, port 22 (edge case),
   `ssh-rsa` rejection, inline-pasted private key rejection, provider default user, an existing system account
   (uid<1000) both accepted and declined, username retry after invalid characters, password mismatch retry,

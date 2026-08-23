@@ -23,7 +23,7 @@ it first — the warn-only pattern is intentional, not an oversight.
 ```
 server-scripts/   VPS hardening, system updates, service management, xrdp — PRIMARY FOCUS
 dev-tools/         devsetup script + a copy-paste Makefile template for FastAPI projects — SECONDARY FOCUS
-web3/               Cosmos/Ethereum node helpers — out of scope, see "web3/ (out of scope)" below
+web3/               Cosmos/Ethereum node helpers — no feature work, see "web3/" note below
 ```
 
 Test tooling for `configuring_server.sh` lives in `.claude/testing/own-script/` (Claude Code-only, not part of
@@ -34,6 +34,16 @@ the shipped repo content) — see "Testing harness" below.
 (full remote-access hardening), and the one most likely to be the subject of a request. Give it the most
 scrutiny on any change. `web3/` is not currently maintained — see the dedicated note at the bottom; do not
 read, review, or modify it unless the user explicitly names a file in it.
+
+## Git workflow: `main` only
+
+This repository has exactly one branch and keeps it that way. **Never create a branch** — no
+feature, fix, or "safety" branch before committing, and no worktree. Commit straight to `main`.
+This overrides the usual "branch first when on the default branch" default: the user works alone
+here, reviews the diff before it lands, and finds extra branches pure overhead. Stated on
+2026-08-23 after a `chore/` branch was created unasked.
+
+Still ask before committing, and never push unless asked.
 
 ## Language convention
 
@@ -185,8 +195,8 @@ bash .claude/lint.sh
 It executes, in this order and stopping at the first failure: `shfmt -i 2 -ci -bn -sr -d`,
 `shellcheck -x -S style`, `bats .claude/testing/unit/`. Config lives in `.shellcheckrc` (`enable=all`),
 `.editorconfig`, `.gitattributes`. The file list comes from `git ls-files --cached --others`, so a
-newly created script is checked before it is ever staged; `web3/` and the vendored
-`.claude/testing/unit/test_helper/` are excluded on purpose.
+newly created script is checked before it is ever staged. The only exclusion is the vendored
+`.claude/testing/unit/test_helper/`; `web3/` is included.
 
 **Comments: only what earns its place.** Rule 11 in `.claude/RULES.md`. A comment exists for a *why*
 the code can't show — a constraint, an ordering requirement, a trap that already caused a bug.
@@ -243,10 +253,16 @@ those need a real VPS.
 Runs `server-scripts/configuring_server.sh` through a matrix of Docker scenarios via the `/test_own_script`
 command (`.claude/commands/test_own_script.md`). Lives under `.claude/` because it's Claude Code's own tooling,
 not shipped repo content — unlike `server-scripts/`/`dev-tools/`, sourcing sibling files here is fine, it's
-never curl/wget-piped. Nested one level under `.claude/testing/<script-name>/` (currently just `own-script/`,
-named after the `/test_own_script` command) so other scripts in this repo can get their own sibling test suite
-later without mixing files. All comments inside the harness itself are in English, per the repo-wide language
-convention above.
+never curl/wget-piped. Nested one level under `.claude/testing/<script-name>/` so each script gets its own
+sibling suite without mixing files. There are five, all built on the same `run.sh`/`lib.sh`/`scenarios.sh`
+shape: `own-script/` (`configuring_server.sh`), `devsetup/` (`install-dev-tools.sh`), `svcctl/`
+(`service-manager.sh` + `install_svcctl.sh`), `sysupdate/` (`update_system_all.sh` + `install_sysupdate.sh`)
+and `xrdp/` (`add_*_xrdp.sh`). Only `own-script/` has a slash command. The other four are launched the same
+way, but each ships its **own** `images/driver.Dockerfile` and `images/target.Dockerfile` (all five differ):
+build from that suite's driver Dockerfile under any tag, then run that suite's `run.sh` with
+`HOST_REPO_PATH` set — see `.claude/commands/test_own_script.md` for the exact `docker build`/`docker run`
+pair to adapt.
+All comments inside the harness itself are in English, per the repo-wide language convention above.
 
 - `run.sh` — entry point, must run inside the `images/driver.Dockerfile` container (docker-outside-of-docker,
   needs `/var/run/docker.sock` mounted) so it can drive `expect` against the script's `/dev/tty` prompts.
@@ -263,9 +279,11 @@ convention above.
   consistency rather than a separate lightweight path.
 - Scenario logs are written to `/tmp/results/<ts>/` **inside the driver container** and die with it. Nothing
   is mounted writable from the host: the user does not read these logs and asked that they stop accumulating
-  in the repo. Don't reintroduce a `results/` mount, a `results/` directory, or a `.gitignore` entry for one —
-  the summary table and, on failure, the tail of each failing scenario's log (`dump_failed_logs` in `run.sh`)
-  go to stderr, which is the only report there is.
+  in the repo. Don't reintroduce a `results/` mount or a host-side `results/` directory — the summary table
+  and, on failure, the tail of each failing scenario's log (`dump_failed_logs` in `run.sh`) go to stderr,
+  which is the only report there is. **Keep the `.claude/testing/*/results/` line in `.gitignore`**: the
+  generic `*.log` rule does not cover `summary.md`, and dropping the explicit rule once already let 42 of
+  them into a commit.
 - Cleanup: each scenario's container+image are removed right after that scenario (`cleanup_scenario`); the
   shared base layers, apt-cache volume, and driver image are removed at the end via `trap full_teardown EXIT`
   (fires on normal completion, error, or Ctrl-C) so nothing accumulates on the host. Never points at a real SSH
@@ -276,12 +294,15 @@ convention above.
   every actual test step (`lib.sh`, `scenarios.sh`, `run.sh`, `drive.exp`) runs inside Linux containers
   regardless of host OS. Don't reintroduce host-OS-specific paths or tools into `lib.sh`/`scenarios.sh`/`run.sh`.
 
-## web3/ (out of scope)
+## web3/ (out of scope for features, still inside the gate)
 
 `web3/cosmos_node_commands.sh` (source-only Cosmos validator helpers) and `web3/geth+beacon.sh` (Sepolia
 geth + Prysm beacon setup) are not currently maintained. **Ignore this directory by default** — don't read,
 review, refactor, or "fix while you're in there" unless the user explicitly asks about a file in `web3/` by
-name. The one exception worth remembering if that ever happens: `web3/geth+beacon.sh` pins
+name. That is a rule about *feature* work: since 2026-08-23 both files are inside `.claude/lint.sh`, pass
+`shfmt` and `shellcheck -S style` clean, and any edit here must keep them passing. They have no bats or
+Docker suite, so the gate is the only automated check they get.
+The one exception worth remembering if the user does ask: `web3/geth+beacon.sh` pins
 `GETH_VERSION`/`GETH_ARCHIVE_SHA256` and `PRYSM_VERSION`/`PRYSM_SCRIPT_COMMIT`/`PRYSM_SCRIPT_SHA256`, so
 bumping either binary version requires updating its paired hash from the upstream release — the same
 lockstep-checksum discipline as the `server-scripts/` installers.

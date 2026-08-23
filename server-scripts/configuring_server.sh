@@ -70,6 +70,7 @@ ROLLBACK_FAIL_FUNC=""
 ROLLBACK_UFW_WAS_ACTIVE=false
 ROLLBACK_UFW_MODIFIED=false
 ROLLBACK_UFW_BACKUP_DIR=""
+UFW_EXTRA_OPEN_PORTS=""
 ROLLBACK_AUTOREVERT_INSTALLED=false
 SCRIPT_SUCCEEDED=false
 SYSCTL_LOG=""
@@ -164,7 +165,11 @@ print_final_summary() {
   sum_item "Sudo user" "${SSH_USER} · AllowUsers · root login disabled"
   sum_item "SSH port" "${SSH_PORT}/tcp · IPv4 only"
   [[ "${SSH_PORT}" != "22" ]] && sum_item "ssh.socket" "disabled and masked"
-  sum_item "UFW" "enabled · only ${SSH_PORT}/tcp (limit) · logging on"
+  if [[ -n "${UFW_EXTRA_OPEN_PORTS}" ]]; then
+    sum_item "UFW" "enabled · ${SSH_PORT}/tcp (limit) · also open: ${UFW_EXTRA_OPEN_PORTS// //tcp, }/tcp · logging on"
+  else
+    sum_item "UFW" "enabled · only ${SSH_PORT}/tcp (limit) · logging on"
+  fi
   sum_item "Fail2Ban" "sshd jail enabled"
   sum_line "Unattended upgrades enabled"
   if [[ "${NTP_SYNCHRONIZED}" == "true" ]]; then
@@ -1166,6 +1171,12 @@ configure_sudo_access() {
     ROLLBACK_SUDOERS_CREATED=true
     visudo -cf "${sudoers_file}" || err "Invalid sudoers entry for ${SSH_USER}"
     ok "Passwordless sudo configured for ${SSH_USER} (NOPASSWD)"
+    # NOPASSWD needs no password, but an explicitly supplied one must not be dropped on the
+    # floor: without it the account stays locked, leaving no console login if the key is lost.
+    if [[ -n "${CLI_PRESET_PASSWORD}" ]]; then
+      set_user_password "${SSH_USER}" "${CLI_PRESET_PASSWORD}"
+      ok "Password also set for ${SSH_USER} (from --password/--password-file) — console login stays possible"
+    fi
   else
     rm -f "${sudoers_file}"
     ROLLBACK_SUDOERS_CREATED=false
@@ -1262,6 +1273,16 @@ backup_sshd_config() {
     ROLLBACK_SSHD_DROPIN_BACKUP="${SSHD_DROPIN_FILE}.bak_${ROLLBACK_ID}"
     cp "${SSHD_DROPIN_FILE}" "${ROLLBACK_SSHD_DROPIN_BACKUP}"
   fi
+}
+
+# Same reasoning as discard_ufw_backup: only the rollback reads these, so on success they
+# are dead weight — and one pair per run otherwise piles up in /etc/ssh forever.
+discard_sshd_backup() {
+  [[ -n "${ROLLBACK_SSHD_BACKUP}" ]] && rm -f "${ROLLBACK_SSHD_BACKUP}"
+  [[ -n "${ROLLBACK_SSHD_DROPIN_BACKUP}" ]] && rm -f "${ROLLBACK_SSHD_DROPIN_BACKUP}"
+  ROLLBACK_SSHD_BACKUP=""
+  ROLLBACK_SSHD_DROPIN_BACKUP=""
+  return 0
 }
 
 apply_sshd_hardening() {
@@ -1465,6 +1486,8 @@ backup_fail2ban_config() {
 }
 
 readonly UFW_NUMBERED_RULE_RE='^[[:space:]]*\[[[:space:]]*([0-9]+)\][[:space:]]+([0-9]+)/tcp([[:space:]]+\(v6\))?[[:space:]]+(LIMIT|ALLOW)[[:space:]]+IN[[:space:]]+Anywhere'
+# Same rule shape but any source, so a `from <ip>` rule is matched too.
+readonly UFW_ANY_SOURCE_RULE_RE='^[[:space:]]*\[[[:space:]]*[0-9]+\][[:space:]]+([0-9]+)/tcp([[:space:]]+\(v6\))?[[:space:]]+(LIMIT|ALLOW)[[:space:]]+IN[[:space:]]+'
 
 # Rules this script may remove unattended: a LIMIT rule it wrote itself on an
 # earlier run under a different port, and the blanket ALLOW on 22 that
@@ -1476,6 +1499,22 @@ ufw_rule_is_ours() {
   [[ "${action}" == "LIMIT" ]] && return 0
   [[ "${action}" == "ALLOW" && "${port}" == "22" ]] && return 0
   return 1
+}
+
+# Ports still reachable once enforcement is done. A source-restricted rule survives it by
+# design (ufw_foreign_allow_ports only ever offers "IN Anywhere" ones for removal), so the
+# summary must not go on claiming a single open port.
+ufw_remaining_open_ports() {
+  local current_port="$1"
+  local rule_line="" port=""
+
+  # shellcheck disable=SC2312 # `ufw status` failing yields no matching lines, which is the correct no-op outcome here
+  while IFS= read -r rule_line; do
+    [[ "${rule_line}" =~ ${UFW_ANY_SOURCE_RULE_RE} ]] || continue
+    port="${BASH_REMATCH[1]}"
+    [[ "${port}" != "${current_port}" ]] || continue
+    printf '%s\n' "${port}"
+  done < <(ufw status numbered 2> /dev/null) | sort -un | tr '\n' ' '
 }
 
 ufw_foreign_allow_ports() {
@@ -1767,6 +1806,13 @@ EOF
 
   ufw logging on
   ufw --force enable
+
+  # shellcheck disable=SC2312 # a failing `ufw status` yields an empty list, which reads as "nothing else open"
+  UFW_EXTRA_OPEN_PORTS="$(ufw_remaining_open_ports "${SSH_PORT}")"
+  UFW_EXTRA_OPEN_PORTS="${UFW_EXTRA_OPEN_PORTS% }"
+  if [[ -n "${UFW_EXTRA_OPEN_PORTS}" ]]; then
+    warn "Besides ${SSH_PORT}/tcp, UFW still allows: ${UFW_EXTRA_OPEN_PORTS// //tcp, }/tcp (kept on request or restricted to a source)"
+  fi
   ok "UFW enabled (logging on)"
 
   # --- Step 6: Fail2Ban ---
@@ -1843,6 +1889,7 @@ EOF
   # a failure in the steps below must not roll it back via rollback_on_failure.
   SCRIPT_SUCCEEDED=true
   discard_ufw_backup
+  discard_sshd_backup
 
   sep
   info "Removing provider default user..."

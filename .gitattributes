@@ -1,3 +1,6 @@
 *.sh text eol=lf
 *.bash text eol=lf
+*.bats text eol=lf
+*.exp text eol=lf
 Makefile text eol=lf
+*Dockerfile text eol=lf
