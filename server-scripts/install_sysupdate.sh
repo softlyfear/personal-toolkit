@@ -12,7 +12,7 @@ IFS=$'\n\t'
 # Constants
 # =============================================================================
 
-readonly BASE_URL="https://raw.githubusercontent.com/user/my-script/main/server-scripts"
+readonly BASE_URL="https://raw.githubusercontent.com/user/my-scripts/main/server-scripts"
 readonly BIN_DIR="/usr/local/bin"
 readonly SOURCE_URL="${BASE_URL}/update_system_all.sh"
 readonly TARGET_FILE="${BIN_DIR}/sysupdate"
