@@ -230,7 +230,12 @@ read_tty() {
   if ! tty_is_usable; then
     err "Interactive input requires a TTY. Download first: wget -qO /tmp/setup.sh ${SCRIPT_RAW_URL} && bash /tmp/setup.sh"
   fi
-  IFS= read -r "$1" < /dev/tty
+  # Opening /dev/tty is not enough: under sudo with stdout redirected (`| tee log`,
+  # `> log`) sudo runs without a pty, and the read fails with EIO instead of blocking.
+  # Bare `read` would surface that as a raw bash error under set -e.
+  if ! IFS= read -r "$1" < /dev/tty 2> /dev/null; then
+    err "Cannot read your answer from the terminal (end of input or I/O error). Do not redirect the output of this script while it asks questions — drop the '| tee'/'> file' part, or run it as root instead of under sudo."
+  fi
 }
 
 sanitize_username_input() {
