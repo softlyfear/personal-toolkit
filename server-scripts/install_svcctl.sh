@@ -12,7 +12,7 @@ IFS=$'\n\t'
 # Constants
 # =============================================================================
 
-readonly BASE_URL="https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts"
+readonly BASE_URL="https://raw.githubusercontent.com/softlyfear/my-scripts/main/server-scripts"
 readonly BIN_DIR="/usr/local/bin"
 readonly SOURCE_URL="${BASE_URL}/service-manager.sh"
 readonly TARGET_FILE="${BIN_DIR}/svcctl"

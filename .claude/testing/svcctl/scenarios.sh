@@ -2,7 +2,7 @@
 # .claude/testing/svcctl/scenarios.sh — scenario matrix for service-manager.sh and
 # install_svcctl.sh. Source-only, via run.sh (after lib.sh). Ubuntu only, real
 # systemctl/apt-get in a real systemd container. install_svcctl.sh scenarios hit the
-# REAL raw.githubusercontent.com/softlyfear/my-script/main URL — they verify the
+# REAL raw.githubusercontent.com/softlyfear/my-scripts/main URL — they verify the
 # currently-pushed origin/main content, not local working-tree edits.
 set -euo pipefail
 

@@ -26,7 +26,7 @@ socket access.
 
 1. Confirm we're at the repo root:
    !`git rev-parse --show-toplevel`
-   If this isn't a git repo, or isn't `my-script` — stop and tell the user.
+   If this isn't a git repo, or isn't `my-scripts` — stop and tell the user.
 
 2. Check Docker is reachable:
    !`docker info`

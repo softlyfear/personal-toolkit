@@ -2,7 +2,7 @@
 # .claude/testing/sysupdate/scenarios.sh — scenario matrix for update_system_all.sh and
 # install_sysupdate.sh. Source-only, via run.sh (after lib.sh). Ubuntu only, real
 # apt-get in a real systemd container. install_sysupdate.sh scenarios hit the REAL
-# raw.githubusercontent.com/softlyfear/my-script/main URL — they verify the
+# raw.githubusercontent.com/softlyfear/my-scripts/main URL — they verify the
 # currently-pushed origin/main content, not local working-tree edits.
 set -euo pipefail
 

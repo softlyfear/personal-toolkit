@@ -79,7 +79,7 @@ Scripts in `server-scripts/` and `dev-tools/` are fetched and executed one file 
 straight from `raw.githubusercontent.com`:
 
 ```bash
-bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/configuring_server.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-scripts/main/server-scripts/configuring_server.sh)
 ```
 
 Nothing is cloned, so a `source "${SCRIPT_DIR}/../lib/log.sh"` would fail at run time on

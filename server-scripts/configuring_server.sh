@@ -23,7 +23,7 @@ IFS=$'\n\t'
 
 readonly DEFAULT_SSH_PORT=2244
 readonly PROVIDER_DEFAULT_USER="user"
-readonly SCRIPT_RAW_URL="https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/configuring_server.sh"
+readonly SCRIPT_RAW_URL="https://raw.githubusercontent.com/softlyfear/my-scripts/main/server-scripts/configuring_server.sh"
 
 readonly SSHD_MAIN="/etc/ssh/sshd_config"
 readonly SSHD_DROPIN_DIR="/etc/ssh/sshd_config.d"

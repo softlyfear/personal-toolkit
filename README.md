@@ -1,4 +1,4 @@
-# my-script
+# my-scripts
 
 Bash utilities for **Ubuntu** (latest LTS) — run from GitHub, no clone required.
 
@@ -7,7 +7,7 @@ Bash utilities for **Ubuntu** (latest LTS) — run from GitHub, no clone require
 ## Structure
 
 ```
-my-script/
+my-scripts/
 ├── server-scripts/     # VPS hardening, updates, svcctl, xrdp
 ├── dev-tools/          # devsetup, FastAPI Makefile
 ├── .claude/lint.sh     # quality gate: shfmt + shellcheck + bats
@@ -56,7 +56,7 @@ VPS can verify are described in
 **Install**
 
 ```bash
-bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/configuring_server.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-scripts/main/server-scripts/configuring_server.sh)
 ```
 
 Default port `2244/tcp` · custom port · optional flags:
@@ -115,10 +115,10 @@ sudo -i
 
 ```bash
 # one-time
-bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/update_system_all.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-scripts/main/server-scripts/update_system_all.sh)
 
 # install global command
-bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/install_sysupdate.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-scripts/main/server-scripts/install_sysupdate.sh)
 sysupdate
 ```
 
@@ -129,7 +129,7 @@ sysupdate
 `svcctl` — wrapper for `postgresql` and `docker`.
 
 ```bash
-bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/install_svcctl.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-scripts/main/server-scripts/install_svcctl.sh)
 
 svcctl status all
 svcctl start postgresql
@@ -146,7 +146,7 @@ Packages: `git` · `uv` · `make` · `docker` · `postgresql`
 
 ```bash
 # all (default)
-bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/dev-tools/install-dev-tools.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-scripts/main/dev-tools/install-dev-tools.sh)
 
 # selected
 bash <(wget -qO- .../install-dev-tools.sh) git uv
@@ -162,7 +162,7 @@ bash <(wget -qO- .../install-dev-tools.sh) --interactive
 Copy into your project — `uv`, ruff, tests, migrations, Docker.
 
 ```bash
-wget -O Makefile https://raw.githubusercontent.com/softlyfear/my-script/main/dev-tools/Makefile
+wget -O Makefile https://raw.githubusercontent.com/softlyfear/my-scripts/main/dev-tools/Makefile
 make help
 ```
 
@@ -190,10 +190,10 @@ During setup you can optionally restrict RDP access to a trusted source IP.
 
 ```bash
 # GNOME
-bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/add_gnome_xrdp.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-scripts/main/server-scripts/add_gnome_xrdp.sh)
 
 # XFCE — lighter
-bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-script/main/server-scripts/add_xfce_xrdp.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-scripts/main/server-scripts/add_xfce_xrdp.sh)
 ```
 
 ---
