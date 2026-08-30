@@ -1164,6 +1164,14 @@ ensure_sudo_user() {
   [[ -n "${SSH_USER_HOME}" && -d "${SSH_USER_HOME}" ]] || err "Home directory not found for ${SSH_USER}"
 }
 
+# Same reasoning as discard_ufw_backup: only the rollback reads it, so on success it is
+# dead weight — and one <user>.bak_* per run otherwise piles up in /etc/sudoers.d.
+discard_sudoers_backup() {
+  [[ -n "${ROLLBACK_SUDOERS_BACKUP}" ]] && rm -f "${ROLLBACK_SUDOERS_BACKUP}"
+  ROLLBACK_SUDOERS_BACKUP=""
+  return 0
+}
+
 configure_sudo_access() {
   local sudoers_file="/etc/sudoers.d/${SSH_USER}"
 
@@ -1505,6 +1513,14 @@ backup_fail2ban_config() {
     ROLLBACK_FAIL2BAN_BACKUP="/etc/fail2ban/jail.local.bak_${ROLLBACK_ID}"
     cp /etc/fail2ban/jail.local "${ROLLBACK_FAIL2BAN_BACKUP}"
   fi
+}
+
+# Same reasoning as discard_ufw_backup: only the rollback reads it, so on success it is
+# dead weight — and one jail.local.bak_* per run otherwise piles up in /etc/fail2ban.
+discard_fail2ban_backup() {
+  [[ -n "${ROLLBACK_FAIL2BAN_BACKUP}" ]] && rm -f "${ROLLBACK_FAIL2BAN_BACKUP}"
+  ROLLBACK_FAIL2BAN_BACKUP=""
+  return 0
 }
 
 readonly UFW_NUMBERED_RULE_RE='^[[:space:]]*\[[[:space:]]*([0-9]+)\][[:space:]]+([0-9]+)/tcp([[:space:]]+\(v6\))?[[:space:]]+(LIMIT|ALLOW)[[:space:]]+IN[[:space:]]+Anywhere'
@@ -1924,6 +1940,8 @@ EOF
   SCRIPT_SUCCEEDED=true
   discard_ufw_backup
   discard_sshd_backup
+  discard_fail2ban_backup
+  discard_sudoers_backup
 
   sep
   info "Removing provider default user..."
