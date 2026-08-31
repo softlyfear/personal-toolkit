@@ -332,6 +332,20 @@ verify_system_account_declined() {
   return "${rc}"
 }
 
+# /run/sshd is ssh.service's RuntimeDirectory=, so stopping ssh.socket can take it away
+# one line before `sshd -t` — on a real VPS that failed validation on a config that was
+# fine and rolled the whole run back.
+verify_missing_privsep_dir() {
+  local name="$1" log="$2" rc=0
+  # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+  verify_common_hardening "${name}" "${log}" tester24 2244 key || rc=1
+  assert_shell "missing /run/sshd was recreated instead of failing the run" \
+    "grep -q 'Created missing privilege separation directory /run/sshd' '${log}'" || rc=1
+  assert_shell "sshd config validation itself never failed" \
+    "! grep -q 'sshd config validation failed' '${log}'" || rc=1
+  return "${rc}"
+}
+
 verify_foreign_ufw_rules_kept() {
   local name="$1" log="$2" rc=0
   # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
@@ -434,6 +448,17 @@ verify_rollback_ufw_midstep() {
 presetup_password_file() { docker exec "$1" bash -c 'printf "Str0ngP@ssphrase!23\n" > /root/.testpass && chmod 600 /root/.testpass'; }
 presetup_provider_user() { docker exec "$1" useradd -m -s /bin/bash user; }
 presetup_system_account() { docker exec "$1" useradd -r -m -d /home/svcacct -s /bin/bash svcacct; }
+
+# Deletes /run/sshd at the exact moment the script stops ssh.socket, which is when it
+# disappeared on a real VPS. Installed before openssh-server exists; systemd picks the
+# drop-in up when step 2 brings the unit in.
+presetup_drop_privsep_dir() {
+  docker exec "$1" bash -c '
+    mkdir -p /etc/systemd/system/ssh.socket.d
+    printf "[Socket]\nExecStopPost=/bin/rm -rf /run/sshd\n" > /etc/systemd/system/ssh.socket.d/drop-privsep.conf
+    rm -rf /run/sshd
+    systemctl daemon-reload' > /dev/null
+}
 
 # A firewall that already carries operator rules (80/443) plus a LIMIT rule this
 # script itself left on a different port during an earlier run. ufw has to be
@@ -632,6 +657,14 @@ run_all_scenarios() {
     "Grant sudo and SSH key access${TAB}n"
   )
   run_heavy_scenario 23_SYSTEM_ACCOUNT_DECLINED ubuntu:latest 1 verify_system_account_declined presetup_system_account args prompts || true
+
+  args=(--user tester24)
+  prompts=(
+    "Use SSH key-only access${TAB}y"
+    "Enable passwordless sudo${TAB}y"
+    "Paste your SSH PUBLIC KEY${TAB}${FIXTURE_ED25519_PUB}"
+  )
+  run_heavy_scenario 24_MISSING_PRIVSEP_DIR ubuntu:latest 0 verify_missing_privsep_dir presetup_drop_privsep_dir args prompts || true
 
   args=(--user tester17)
   prompts=(
