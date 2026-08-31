@@ -27,6 +27,7 @@ readonly SCRIPT_RAW_URL="https://raw.githubusercontent.com/softlyfear/my-scripts
 
 readonly SSHD_MAIN="/etc/ssh/sshd_config"
 readonly SSHD_DROPIN_DIR="/etc/ssh/sshd_config.d"
+readonly SSHD_PRIVSEP_DIR="/run/sshd"
 # The 00- prefix is required: sshd applies the FIRST value it encounters,
 # and drop-ins are read in lexicographic order — 00- wins over 50-cloud-init.conf
 readonly SSHD_DROPIN_FILE="${SSHD_DROPIN_DIR}/00-hardening.conf"
@@ -728,6 +729,16 @@ get_sshd_runtime_config() {
   sshd -T 2> /dev/null || true
 }
 
+# /run/sshd is ssh.service's RuntimeDirectory=, so systemd deletes it when the unit is
+# stopped — including the `systemctl disable --now ssh.socket` this script runs a few lines
+# before validating. Without it `sshd -t`/`sshd -T` abort with "Missing privilege
+# separation directory" and the whole run rolls back on a config that was actually fine.
+ensure_sshd_privsep_dir() {
+  [[ -d "${SSHD_PRIVSEP_DIR}" ]] && return 0
+  install -d -m 0755 -o root -g root "${SSHD_PRIVSEP_DIR}" || return 1
+  warn "Created missing privilege separation directory ${SSHD_PRIVSEP_DIR}"
+}
+
 verify_ssh_port_available() {
   local port="$1"
 
@@ -947,6 +958,10 @@ rollback_on_failure() {
   if [[ -n "${ROLLBACK_SSHD_BACKUP}" && -f "${ROLLBACK_SSHD_BACKUP}" ]]; then
     cp "${ROLLBACK_SSHD_BACKUP}" "${SSHD_MAIN}"
     warn "Restored ${SSHD_MAIN} from backup"
+    # A missing /run/sshd fails this test too, which would leave the restored config
+    # written but never loaded — the one thing this rollback exists to prevent.
+    # shellcheck disable=SC2310 # best effort: sshd -t below is what actually gates the restart
+    ensure_sshd_privsep_dir > /dev/null 2>&1 || true
     if sshd -t > /dev/null 2>&1; then
       # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
       if unit_exists ssh.service; then
@@ -1369,6 +1384,8 @@ EOF
   [[ "${SSH_PORT}" != "22" ]] && handle_ssh_socket
 
   info "Validating sshd config..."
+  # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+  ensure_sshd_privsep_dir || err "Cannot create ${SSHD_PRIVSEP_DIR}, required by sshd -t"
   sshd -t || err "sshd config validation failed"
   restart_sshd_service
   sleep 1
