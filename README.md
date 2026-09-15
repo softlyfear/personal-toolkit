@@ -8,10 +8,12 @@ Bash utilities for **Ubuntu** (latest LTS) — run from GitHub, no clone require
 
 ```
 my-scripts/
-├── server-scripts/     # VPS hardening, updates, svcctl, xrdp
-├── dev-tools/          # devsetup, FastAPI Makefile
+├── .claude/            # claude code settings
 ├── .claude/lint.sh     # quality gate: shfmt + shellcheck + bats
 ├── .claude/testing/    # all tests: unit/ (bats) + Docker scenario suites
+├── server-scripts/     # VPS hardening, updates, svcctl, xrdp
+├── dev-tools/          # devsetup, FastAPI Makefile
+├── cli/                # claude-auto-ping
 └── web3/               # Cosmos, Ethereum nodes
 ```
 
@@ -40,18 +42,18 @@ VPS can verify are described in
 
 **Prompts:** SSH key only? → default **yes** · username → default `admin` · password setup or NOPASSWD sudo
 
-| | Key mode (default) | Password mode |
-|---|---|---|
-| Auth | publickey · ed25519/ecdsa · rsa rejected | password only |
-| Sudo user | `admin` (or custom) · `AllowUsers` | same |
-| Sudo password | optional NOPASSWD — default **no** | required |
-| Root SSH | disabled in both modes | disabled |
+|               | Key mode (default)                       | Password mode |
+| ------------- | ---------------------------------------- | ------------- |
+| Auth          | publickey · ed25519/ecdsa · rsa rejected | password only |
+| Sudo user     | `admin` (or custom) · `AllowUsers`       | same          |
+| Sudo password | optional NOPASSWD — default **no**       | required      |
+| Root SSH      | disabled in both modes                   | disabled      |
 
-| | |
-|---|---|
-| Firewall | UFW deny incoming · `${PORT}/tcp` (`limit`) · logging on. Blanket rules on other ports are removed only after you confirm; rules restricted to a source IP are kept and listed in the summary |
-| Also applied | Fail2Ban (sshd · banaction=ufw · systemd backend) · unattended-upgrades (no auto-reboot) · NTP · sysctl hardening · journald limits (200M / 14 days) · cron/at → root only |
-| Safety | rollback on failure · `ssh.socket` masked if port ≠ 22 · IPv4 only · optional `--confirm-window` auto-revert · password also written to `/root/.<user>-credentials` (mode 600) |
+|              |                                                                                                                                                                                               |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Firewall     | UFW deny incoming · `${PORT}/tcp` (`limit`) · logging on. Blanket rules on other ports are removed only after you confirm; rules restricted to a source IP are kept and listed in the summary |
+| Also applied | Fail2Ban (sshd · banaction=ufw · systemd backend) · unattended-upgrades (no auto-reboot) · NTP · sysctl hardening · journald limits (200M / 14 days) · cron/at → root only                    |
+| Safety       | rollback on failure · `ssh.socket` masked if port ≠ 22 · IPv4 only · optional `--confirm-window` auto-revert · password also written to `/root/.<user>-credentials` (mode 600)                |
 
 **Install**
 
@@ -73,14 +75,14 @@ Without flags: username prompt · password step asks **generate secure password?
 <details>
 <summary><strong>All flags</strong></summary>
 
-| Flag | Short | Value | Default | Description |
-|---|---|---|---|---|
-| *(positional)* | | `port` | `2244` | SSH port |
-| `--user` | `-u` | `NAME` | prompt → `admin` | sudo username (`root` not allowed) |
-| `--password-file` | | `PATH` | — | password from a file — recommended for automation, keeps it out of `ps`/shell history |
-| `--password` | `-p` | `PASS` | prompt or generate | user password — skips password step. Visible via `ps`/`/proc` while the script runs; prefer `--password-file` |
-| `--confirm-window` | | `MINUTES` | off | arm an auto-revert: SSH config and firewall return to their pre-hardening state after `MINUTES` (5–1440) unless you run `sudo /usr/local/sbin/hardening-confirm`. Use it when you have no console access |
-| `--help` | `-h` | | | show help and exit |
+| Flag               | Short | Value     | Default            | Description                                                                                                                                                                                              |
+| ------------------ | ----- | --------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| _(positional)_     |       | `port`    | `2244`             | SSH port                                                                                                                                                                                                 |
+| `--user`           | `-u`  | `NAME`    | prompt → `admin`   | sudo username (`root` not allowed)                                                                                                                                                                       |
+| `--password-file`  |       | `PATH`    | —                  | password from a file — recommended for automation, keeps it out of `ps`/shell history                                                                                                                    |
+| `--password`       | `-p`  | `PASS`    | prompt or generate | user password — skips password step. Visible via `ps`/`/proc` while the script runs; prefer `--password-file`                                                                                            |
+| `--confirm-window` |       | `MINUTES` | off                | arm an auto-revert: SSH config and firewall return to their pre-hardening state after `MINUTES` (5–1440) unless you run `sudo /usr/local/sbin/hardening-confirm`. Use it when you have no console access |
+| `--help`           | `-h`  |           |                    | show help and exit                                                                                                                                                                                       |
 
 </details>
 
@@ -94,16 +96,16 @@ sudo -i
 <details>
 <summary><strong>Logs</strong></summary>
 
-| | |
-|---|---|
-| UFW | `sudo tail -f /var/log/ufw.log` |
-| UFW (empty log) | `sudo grep UFW /var/log/syslog \| tail -30` |
-| Fail2Ban | `sudo journalctl -u fail2ban -f` |
-| Banned IPs | `sudo fail2ban-client status sshd` |
-| SSH | `sudo journalctl -u ssh -f` |
-| Auth | `sudo tail -f /var/log/auth.log` |
-| Martians | `sudo tail -f /var/log/kern.log` |
-| Sysctl (per run) | `sudo cat /var/log/sysctl-hardening-*.log` |
+|                  |                                             |
+| ---------------- | ------------------------------------------- |
+| UFW              | `sudo tail -f /var/log/ufw.log`             |
+| UFW (empty log)  | `sudo grep UFW /var/log/syslog \| tail -30` |
+| Fail2Ban         | `sudo journalctl -u fail2ban -f`            |
+| Banned IPs       | `sudo fail2ban-client status sshd`          |
+| SSH              | `sudo journalctl -u ssh -f`                 |
+| Auth             | `sudo tail -f /var/log/auth.log`            |
+| Martians         | `sudo tail -f /var/log/kern.log`            |
+| Sysctl (per run) | `sudo cat /var/log/sysctl-hardening-*.log`  |
 
 </details>
 
@@ -169,17 +171,27 @@ make help
 <details>
 <summary><strong>Common commands</strong></summary>
 
-| | |
-|---|---|
-| `make install` | sync dependencies |
-| `make run` | dev server |
-| `make test` | pytest |
-| `make fmt` | ruff format + fix |
-| `make check` | fmt + type |
-| `make migrate` | create + apply migration |
-| `make docker-up` | start containers |
+|                  |                          |
+| ---------------- | ------------------------ |
+| `make install`   | sync dependencies        |
+| `make run`       | dev server               |
+| `make test`      | pytest                   |
+| `make fmt`       | ruff format + fix        |
+| `make check`     | fmt + type               |
+| `make migrate`   | create + apply migration |
+| `make docker-up` | start containers         |
 
 </details>
+
+---
+
+## CLI
+
+### claude-auto-ping
+
+Pings Claude Code on a schedule (MSK: `07:00` · `12:01` · `17:02` · `22:03`) — each message opens a new 5-hour session window. `uv` + venv · no API key · auto-start via systemd user unit.
+
+Details — [`cli/claude-auto-ping/README.md`](cli/claude-auto-ping/README.md)
 
 ---
 
@@ -202,10 +214,10 @@ bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/my-scripts/main/se
 
 Run from a local clone. **Not currently maintained** — kept for reference.
 
-| Script | |
-|---|---|
+| Script                                                    |                                                                                                                                                        |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | [`cosmos_node_commands.sh`](web3/cosmos_node_commands.sh) | `delegate` · `balance` · `rewards` · `unjail` · `voting` · `status` · `logs` · `restart` · `add` (on-chain actions and `restart` ask for confirmation) |
-| [`geth+beacon.sh`](web3/geth+beacon.sh) | Sepolia geth + Prysm beacon |
+| [`geth+beacon.sh`](web3/geth+beacon.sh)                   | Sepolia geth + Prysm beacon                                                                                                                            |
 
 ```bash
 # Cosmos — set variables in file, then:
