@@ -71,7 +71,7 @@ ROLLBACK_FAIL_FUNC=""
 ROLLBACK_UFW_WAS_ACTIVE=false
 ROLLBACK_UFW_MODIFIED=false
 ROLLBACK_UFW_BACKUP_DIR=""
-UFW_EXTRA_OPEN_PORTS=""
+UFW_EXTRA_OPEN_TARGETS=""
 ROLLBACK_AUTOREVERT_INSTALLED=false
 SCRIPT_SUCCEEDED=false
 SYSCTL_LOG=""
@@ -167,8 +167,8 @@ print_final_summary() {
   sum_item "Sudo user" "${SSH_USER} · AllowUsers · root login disabled"
   sum_item "SSH port" "${SSH_PORT}/tcp · IPv4 only"
   [[ "${SSH_PORT}" != "22" ]] && sum_item "ssh.socket" "disabled and masked"
-  if [[ -n "${UFW_EXTRA_OPEN_PORTS}" ]]; then
-    sum_item "UFW" "enabled · ${SSH_PORT}/tcp (limit) · also open: ${UFW_EXTRA_OPEN_PORTS// //tcp, }/tcp · logging on"
+  if [[ -n "${UFW_EXTRA_OPEN_TARGETS}" ]]; then
+    sum_item "UFW" "enabled · ${SSH_PORT}/tcp (limit) · also open: ${UFW_EXTRA_OPEN_TARGETS//,/, } · logging on"
   else
     sum_item "UFW" "enabled · only ${SSH_PORT}/tcp (limit) · logging on"
   fi
@@ -826,8 +826,15 @@ remove_lockout_autorevert() {
 # is the only mechanism that actually recovers a server nobody can log into.
 install_lockout_autorevert() {
   local minutes="$1"
+  local -a snapshot_paths=(ssh)
 
-  tar -C /etc -cf "${AUTOREVERT_SNAPSHOT}" ssh || err "Failed to snapshot /etc/ssh for auto-revert"
+  # The firewall is part of "the way it was": disabling UFW outright would recover access
+  # by opening everything else the operator had closed.
+  [[ -d /etc/ufw ]] && snapshot_paths+=(ufw)
+  [[ -f /etc/default/ufw ]] && snapshot_paths+=(default/ufw)
+
+  tar -C /etc -cf "${AUTOREVERT_SNAPSHOT}" "${snapshot_paths[@]}" \
+    || err "Failed to snapshot SSH/UFW config for auto-revert"
   chmod 600 "${AUTOREVERT_SNAPSHOT}"
 
   cat > "${AUTOREVERT_SCRIPT}" << EOF
@@ -835,9 +842,15 @@ install_lockout_autorevert() {
 # Installed by configuring_server.sh --confirm-window ${minutes}.
 set -uo pipefail
 logger -t hardening-autorevert "no confirmation within ${minutes}m — restoring pre-hardening SSH access"
-ufw --force disable > /dev/null 2>&1 || true
 rm -rf /etc/ssh
 tar -C /etc -xf "${AUTOREVERT_SNAPSHOT}"
+# Same reasoning as rollback_on_failure: re-enable reloads the restored rules on a host
+# that had UFW running, and only a host that had it off gets it switched off.
+if grep -qs '^ENABLED=yes' /etc/ufw/ufw.conf; then
+  ufw --force enable > /dev/null 2>&1 || true
+else
+  ufw --force disable > /dev/null 2>&1 || true
+fi
 systemctl unmask ssh.socket > /dev/null 2>&1 || true
 systemctl enable --now ssh.socket > /dev/null 2>&1 || true
 systemctl restart ssh.service > /dev/null 2>&1 || true
@@ -893,6 +906,15 @@ EOF
     || err "Failed to arm the auto-revert timer"
   ROLLBACK_AUTOREVERT_INSTALLED=true
   ok "Auto-revert armed: SSH is restored in ${minutes} min unless you run ${AUTOREVERT_CONFIRM}"
+}
+
+# OnActiveSec counts from the moment the timer was started, and the timer is armed before
+# the prompts. Restarting it at each point where the run can sit waiting for the operator
+# keeps the window measuring "time to test a login", not "time spent pasting a key".
+rearm_lockout_autorevert() {
+  [[ "${ROLLBACK_AUTOREVERT_INSTALLED}" == "true" ]] || return 0
+  systemctl is-active --quiet hardening-autorevert.timer || return 0
+  systemctl restart hardening-autorevert.timer > /dev/null 2>&1 || true
 }
 
 # =============================================================================
@@ -1077,9 +1099,13 @@ remove_provider_default_user() {
     return 0
   fi
 
-  # shellcheck disable=SC2312 # exit status of this substitution is intentionally unused here
-  if [[ "$(whoami)" == "${stale_user}" ]]; then
-    warn "Cannot remove '${stale_user}' while logged in as that user — run as root"
+  # main() requires EUID 0, so `whoami` is always root here. The login behind `sudo` is in
+  # SUDO_USER, the one behind `su -` only in logname. pkill below would kill that session —
+  # and this script with it — before the summary shows the credentials.
+  local operator_login="${SUDO_USER:-}"
+  [[ -n "${operator_login}" ]] || operator_login="$(logname 2> /dev/null || true)"
+  if [[ "${operator_login}" == "${stale_user}" ]]; then
+    warn "This run was started from a '${stale_user}' login — not removing it now, that would end this session"
     return 1
   fi
 
@@ -1096,6 +1122,8 @@ remove_provider_default_user() {
   # No rollback possible — only runs after verify_ssh_authorized_key has confirmed
   # working access under the new sudo user.
   while ((attempt <= max_attempts)); do
+    # Killed first: `userdel -f` succeeds with processes still running, and those keep the
+    # freed uid — which the next useradd may hand to a different account.
     pkill -u "${stale_user}" 2> /dev/null || true
     sleep 1
     pkill -9 -u "${stale_user}" 2> /dev/null || true
@@ -1450,6 +1478,7 @@ harden_ssh_stack() {
     configure_sudo_access password
   fi
 
+  rearm_lockout_autorevert
   info "Hardening SSH configuration..."
   apply_sshd_hardening
   verify_sshd_port "${SSH_PORT}"
@@ -1540,72 +1569,86 @@ discard_fail2ban_backup() {
   return 0
 }
 
-readonly UFW_NUMBERED_RULE_RE='^[[:space:]]*\[[[:space:]]*([0-9]+)\][[:space:]]+([0-9]+)/tcp([[:space:]]+\(v6\))?[[:space:]]+(LIMIT|ALLOW)[[:space:]]+IN[[:space:]]+Anywhere'
-# Same rule shape but any source, so a `from <ip>` rule is matched too.
-readonly UFW_ANY_SOURCE_RULE_RE='^[[:space:]]*\[[[:space:]]*[0-9]+\][[:space:]]+([0-9]+)/tcp([[:space:]]+\(v6\))?[[:space:]]+(LIMIT|ALLOW)[[:space:]]+IN[[:space:]]+'
+# `ufw status numbered` renders a rule as "[ N] <target> <ACTION> <DIR> <source>", and
+# <target> is not always a numeric tcp port: `ufw allow 80` prints a bare "80", and udp
+# ports, ranges and application profiles ("Nginx Full") all land here too. Matching only
+# ([0-9]+)/tcp left every other shape unseen, so the summary could claim a single open
+# port while one of them was still reachable.
+readonly UFW_NUMBERED_RULE_RE='^[[:space:]]*\[[[:space:]]*([0-9]+)\][[:space:]]+(.*[^[:space:]])[[:space:]]+(LIMIT|ALLOW|DENY|REJECT)[[:space:]]+(IN|OUT)[[:space:]]+(.*[^[:space:]])[[:space:]]*$'
 
 # Rules this script may remove unattended: a LIMIT rule it wrote itself on an
-# earlier run under a different port, and the blanket ALLOW on 22 that
-# add_*_xrdp.sh leaves behind. Anything else belongs to the operator.
+# earlier run under a different port, and the blanket ALLOW on 22/tcp that
+# add_*_xrdp.sh leaves behind. Anything else — including every non-tcp, range and
+# profile shape — belongs to the operator and needs an explicit yes.
 ufw_rule_is_ours() {
-  local port="$1" action="$2" current_port="$3"
+  local target="$1" action="$2" current_port="$3"
 
-  [[ "${port}" != "${current_port}" ]] || return 1
-  [[ "${action}" == "LIMIT" ]] && return 0
-  [[ "${action}" == "ALLOW" && "${port}" == "22" ]] && return 0
+  [[ "${target}" != "${current_port}/tcp" ]] || return 1
+  [[ "${action}" == "LIMIT" && "${target}" =~ ^[0-9]+/tcp$ ]] && return 0
+  [[ "${action}" == "ALLOW" && "${target}" == "22/tcp" ]] && return 0
   return 1
 }
 
-# Ports still reachable once enforcement is done. A source-restricted rule survives it by
-# design (ufw_foreign_allow_ports only ever offers "IN Anywhere" ones for removal), so the
-# summary must not go on claiming a single open port.
-ufw_remaining_open_ports() {
+# Targets still reachable once enforcement is done, comma-separated. A source-restricted
+# rule survives it by design (ufw_foreign_allow_targets only ever offers "IN Anywhere"
+# ones for removal), so the summary must not go on claiming a single open port.
+ufw_remaining_open_targets() {
   local current_port="$1"
-  local rule_line="" port=""
-
-  # shellcheck disable=SC2312 # `ufw status` failing yields no matching lines, which is the correct no-op outcome here
-  while IFS= read -r rule_line; do
-    [[ "${rule_line}" =~ ${UFW_ANY_SOURCE_RULE_RE} ]] || continue
-    port="${BASH_REMATCH[1]}"
-    [[ "${port}" != "${current_port}" ]] || continue
-    printf '%s\n' "${port}"
-  done < <(ufw status numbered 2> /dev/null) | sort -un | tr '\n' ' '
-}
-
-ufw_foreign_allow_ports() {
-  local current_port="$1"
-  local rule_line="" port="" action=""
+  local rule_line="" target="" action="" direction=""
 
   # shellcheck disable=SC2312 # `ufw status` failing yields no matching lines, which is the correct no-op outcome here
   while IFS= read -r rule_line; do
     [[ "${rule_line}" =~ ${UFW_NUMBERED_RULE_RE} ]] || continue
-    port="${BASH_REMATCH[2]}"
-    action="${BASH_REMATCH[4]}"
-    [[ "${port}" != "${current_port}" ]] || continue
+    target="${BASH_REMATCH[2]% (v6)}"
+    action="${BASH_REMATCH[3]}"
+    direction="${BASH_REMATCH[4]}"
+    [[ "${direction}" == "IN" ]] || continue
+    [[ "${action}" == "LIMIT" || "${action}" == "ALLOW" ]] || continue
+    [[ "${target}" != "${current_port}/tcp" ]] || continue
+    printf '%s\n' "${target}"
+  done < <(ufw status numbered 2> /dev/null) | LC_ALL=C sort -u | paste -sd, -
+}
+
+ufw_foreign_allow_targets() {
+  local current_port="$1"
+  local rule_line="" target="" action="" direction="" rule_source=""
+
+  # shellcheck disable=SC2312 # `ufw status` failing yields no matching lines, which is the correct no-op outcome here
+  while IFS= read -r rule_line; do
+    [[ "${rule_line}" =~ ${UFW_NUMBERED_RULE_RE} ]] || continue
+    target="${BASH_REMATCH[2]% (v6)}"
+    action="${BASH_REMATCH[3]}"
+    direction="${BASH_REMATCH[4]}"
+    rule_source="${BASH_REMATCH[5]}"
+    [[ "${direction}" == "IN" ]] || continue
+    [[ "${action}" == "LIMIT" || "${action}" == "ALLOW" ]] || continue
+    [[ "${rule_source}" == Anywhere* ]] || continue
+    [[ "${target}" != "${current_port}/tcp" ]] || continue
     # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
-    ufw_rule_is_ours "${port}" "${action}" "${current_port}" && continue
-    printf '%s\n' "${port}"
-  done < <(ufw status numbered 2> /dev/null) | sort -un | tr '\n' ' '
+    ufw_rule_is_ours "${target}" "${action}" "${current_port}" && continue
+    printf '%s\n' "${target}"
+  done < <(ufw status numbered 2> /dev/null) | LC_ALL=C sort -u | paste -sd, -
 }
 
 # Enforces "only ${current_port}/tcp reachable". Rules the script did not write are
 # removed only after an explicit yes — silently closing a live 80/443 is an outage.
 ufw_enforce_single_open_port() {
   local current_port="$1"
-  local rule_line="" rule_num="" port="" action=""
-  local foreign_ports=""
+  local rule_line="" rule_num="" target="" action="" direction="" rule_source=""
+  local foreign_targets=""
   local remove_foreign=false
   local found=true
+  local undeletable=$'\n'
 
-  foreign_ports="$(ufw_foreign_allow_ports "${current_port}")"
-  foreign_ports="${foreign_ports% }"
+  foreign_targets="$(ufw_foreign_allow_targets "${current_port}")"
 
-  if [[ -n "${foreign_ports}" ]]; then
-    warn "UFW already allows other ports from anywhere: ${foreign_ports// //tcp, }/tcp"
+  if [[ -n "${foreign_targets}" ]]; then
+    warn "UFW already allows other targets from anywhere: ${foreign_targets//,/, }"
     warn "Keeping them leaves more than ${current_port}/tcp reachable; removing them stops that traffic now"
     prompt_yes_no remove_foreign "Remove these existing ALLOW rules too?" false
     [[ "${remove_foreign}" == "true" ]] \
-      || warn "Keeping operator rules for: ${foreign_ports// //tcp, }/tcp"
+      || warn "Keeping operator rules for: ${foreign_targets//,/, }"
+    rearm_lockout_autorevert
   fi
 
   while [[ "${found}" == "true" ]]; do
@@ -1614,15 +1657,29 @@ ufw_enforce_single_open_port() {
     while IFS= read -r rule_line; do
       [[ "${rule_line}" =~ ${UFW_NUMBERED_RULE_RE} ]] || continue
       rule_num="${BASH_REMATCH[1]}"
-      port="${BASH_REMATCH[2]}"
-      action="${BASH_REMATCH[4]}"
-      [[ "${port}" != "${current_port}" ]] || continue
+      target="${BASH_REMATCH[2]% (v6)}"
+      action="${BASH_REMATCH[3]}"
+      direction="${BASH_REMATCH[4]}"
+      rule_source="${BASH_REMATCH[5]}"
+      [[ "${direction}" == "IN" ]] || continue
+      [[ "${action}" == "LIMIT" || "${action}" == "ALLOW" ]] || continue
+      [[ "${rule_source}" == Anywhere* ]] || continue
+      [[ "${target}" != "${current_port}/tcp" ]] || continue
+      # A rule ufw refuses to delete still shows up in the next pass; without this the
+      # outer loop would re-select it forever.
+      # Keyed on the rule text without its number, so the v4 and v6 twins stay distinct.
+      [[ "${undeletable}" == *$'\n'"${rule_line#*]}"$'\n'* ]] && continue
       # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
-      if ! ufw_rule_is_ours "${port}" "${action}" "${current_port}" && [[ "${remove_foreign}" != "true" ]]; then
+      if ! ufw_rule_is_ours "${target}" "${action}" "${current_port}" && [[ "${remove_foreign}" != "true" ]]; then
         continue
       fi
-      ufw --force delete "${rule_num}" > /dev/null 2>&1 || true
-      warn "Removed UFW rule ${action} ${port}/tcp"
+      if ufw --force delete "${rule_num}" > /dev/null 2>&1; then
+        warn "Removed UFW rule ${action} ${target}"
+      else
+        warn "Failed to remove UFW rule ${action} ${target} — leaving it in place"
+        undeletable+="${rule_line#*]}"$'\n'
+      fi
+      # Rule numbers shift after every delete, so the status has to be re-read either way.
       found=true
       break
     done < <(ufw status numbered 2> /dev/null)
@@ -1660,12 +1717,23 @@ restore_ufw_config() {
   return 0
 }
 
+ufw_limit_rule_present() {
+  local port_rule="$1"
+
+  ufw status numbered 2> /dev/null \
+    | grep -qE "^[[:space:]]*\[[[:space:]]*[0-9]+\][[:space:]]+${port_rule}[[:space:]]+LIMIT"
+}
+
+# Returns 2 for "already there" so the caller can still tell a real `ufw limit` failure
+# apart from a normal re-run — a blanket `|| true` hid the difference, and the next two
+# commands turn a missing SSH rule into a closed firewall.
 ufw_limit_port_once() {
   local port_rule="$1"
 
-  if ufw status numbered 2> /dev/null | grep -qE "^[[:space:]]*\[[[:space:]]*[0-9]+\][[:space:]]+${port_rule}[[:space:]]+LIMIT"; then
+  # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+  if ufw_limit_rule_present "${port_rule}"; then
     warn "UFW rule for ${port_rule} already exists — skipping"
-    return 1
+    return 2
   fi
 
   ufw limit "${port_rule}"
@@ -1851,8 +1919,11 @@ EOF
   # would black-hole every new connection across the prompt in
   # ufw_enforce_single_open_port, which waits for an operator who may no longer
   # be able to reach the box.
-  # shellcheck disable=SC2310 # returns 1 when the rule already exists — a normal re-run, not a failure
-  ufw_limit_port_once "${SSH_PORT}/tcp" || true
+  local ufw_limit_rc=0
+  # shellcheck disable=SC2310 # returns 2 when the rule already exists — a normal re-run, not a failure
+  ufw_limit_port_once "${SSH_PORT}/tcp" || ufw_limit_rc=$?
+  ((ufw_limit_rc == 0 || ufw_limit_rc == 2)) \
+    || err "Failed to add the UFW LIMIT rule for ${SSH_PORT}/tcp — refusing to enable the firewall without it"
 
   ufw default deny incoming
   ufw default allow outgoing
@@ -1862,11 +1933,17 @@ EOF
   ufw logging on
   ufw --force enable
 
+  # `ufw status` lists no rules while the firewall is inactive, so this is the first point
+  # where the rule can be confirmed instead of assumed. err() here still reaches the UFW
+  # branch of the rollback, which restores the previous rules and state.
+  # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+  ufw_limit_rule_present "${SSH_PORT}/tcp" \
+    || err "UFW is active but has no rule for ${SSH_PORT}/tcp — refusing to leave SSH firewalled off"
+
   # shellcheck disable=SC2312 # a failing `ufw status` yields an empty list, which reads as "nothing else open"
-  UFW_EXTRA_OPEN_PORTS="$(ufw_remaining_open_ports "${SSH_PORT}")"
-  UFW_EXTRA_OPEN_PORTS="${UFW_EXTRA_OPEN_PORTS% }"
-  if [[ -n "${UFW_EXTRA_OPEN_PORTS}" ]]; then
-    warn "Besides ${SSH_PORT}/tcp, UFW still allows: ${UFW_EXTRA_OPEN_PORTS// //tcp, }/tcp (kept on request or restricted to a source)"
+  UFW_EXTRA_OPEN_TARGETS="$(ufw_remaining_open_targets "${SSH_PORT}")"
+  if [[ -n "${UFW_EXTRA_OPEN_TARGETS}" ]]; then
+    warn "Besides ${SSH_PORT}/tcp, UFW still allows: ${UFW_EXTRA_OPEN_TARGETS//,/, } (kept on request or restricted to a source)"
   fi
   ok "UFW enabled (logging on)"
 
@@ -1969,11 +2046,14 @@ EOF
 
   clear_password_cli_history
 
+  # The operator can only test a login once the run is over, so the advertised window
+  # starts here.
+  rearm_lockout_autorevert
   print_final_summary
   unset SSH_USER_PASSWORD
 
   if [[ "${PROVIDER_USER_CLEANUP_FAILED}" == "true" ]]; then
-    err "Provider default user '${PROVIDER_DEFAULT_USER}' still exists after cleanup retries — remove manually: userdel -rf ${PROVIDER_DEFAULT_USER}"
+    err "Provider default user '${PROVIDER_DEFAULT_USER}' was not removed (see the warning above) — once logged in as '${SSH_USER}', remove it manually: userdel -rf ${PROVIDER_DEFAULT_USER}"
   fi
 }
 

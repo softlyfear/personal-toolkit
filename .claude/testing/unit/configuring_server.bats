@@ -299,27 +299,71 @@ setup() {
 # --- UFW rule ownership -----------------------------------------------------
 
 @test "ufw_rule_is_ours claims LIMIT rules left on another port" {
-  run ufw_rule_is_ours 2244 LIMIT 2255
+  run ufw_rule_is_ours 2244/tcp LIMIT 2255
   assert_success
 }
 
 @test "ufw_rule_is_ours claims the blanket ALLOW on 22" {
-  run ufw_rule_is_ours 22 ALLOW 2244
+  run ufw_rule_is_ours 22/tcp ALLOW 2244
   assert_success
 }
 
 @test "ufw_rule_is_ours disclaims an operator ALLOW rule" {
   for port in 80 443 8080; do
-    run ufw_rule_is_ours "${port}" ALLOW 2244
+    run ufw_rule_is_ours "${port}/tcp" ALLOW 2244
     assert_failure
   done
 }
 
 @test "ufw_rule_is_ours never claims the port being configured" {
-  run ufw_rule_is_ours 2244 LIMIT 2244
+  run ufw_rule_is_ours 2244/tcp LIMIT 2244
   assert_failure
-  run ufw_rule_is_ours 22 ALLOW 22
+  run ufw_rule_is_ours 22/tcp ALLOW 22
   assert_failure
+}
+
+# Everything the old ([0-9]+)/tcp regex could not even see: these must reach the operator
+# as a question, never be deleted unattended.
+@test "ufw_rule_is_ours disclaims non-tcp, range and profile targets" {
+  for target in 53/udp 8000:9000/tcp 8000:9000/udp "Nginx Full" OpenSSH 80; do
+    run ufw_rule_is_ours "${target}" ALLOW 2244
+    assert_failure
+    run ufw_rule_is_ours "${target}" LIMIT 2244
+    assert_failure
+  done
+}
+
+# --- UFW status parsing -----------------------------------------------------
+
+ufw_status_fixture() {
+  cat << 'EOF'
+Status: active
+
+     To                         Action      From
+     --                         ------      ----
+[ 1] 2244/tcp                   LIMIT IN    Anywhere
+[ 2] 80                         ALLOW IN    Anywhere
+[ 3] Nginx Full                 ALLOW IN    Anywhere
+[ 4] 53/udp                     ALLOW IN    Anywhere
+[ 5] 8000:9000/tcp              ALLOW IN    Anywhere
+[ 6] 5432/tcp                   ALLOW IN    10.0.0.0/8
+[ 7] 25/tcp                     DENY IN     Anywhere
+[ 8] 2244/tcp (v6)              LIMIT IN    Anywhere (v6)
+EOF
+}
+
+@test "ufw_remaining_open_targets reports every shape except the configured port" {
+  ufw() { ufw_status_fixture; }
+  run ufw_remaining_open_targets 2244
+  assert_success
+  assert_output "53/udp,5432/tcp,80,8000:9000/tcp,Nginx Full"
+}
+
+@test "ufw_foreign_allow_targets skips source-restricted rules and the script's own" {
+  ufw() { ufw_status_fixture; }
+  run ufw_foreign_allow_targets 2244
+  assert_success
+  assert_output "53/udp,80,8000:9000/tcp,Nginx Full"
 }
 
 @test "sourcing the script does not execute main" {
