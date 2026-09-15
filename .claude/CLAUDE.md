@@ -136,13 +136,20 @@ points to preserve when modifying it:
   restoring `UFW_STATE_FILES` (`user.rules`, `user6.rules`, `ufw.conf`, `/etc/default/ufw`), because
   `ufw delete` has no inverse.
 - **`ufw_enforce_single_open_port()` asks before touching rules the script did not write.**
-  `ufw_rule_is_ours()` claims only its own `LIMIT` rules on other ports and the blanket `ALLOW` on 22 that
-  `add_*_xrdp.sh` leaves; anything else (an operator's 80/443) needs an explicit yes. This was verified the
-  hard way — the earlier `ufw_prune_stale_ssh_limit_rules()` silently deleted 80/tcp and 443/tcp on a re-run.
+  `ufw_rule_is_ours()` claims only its own `LIMIT` rules on other `N/tcp` ports and the blanket `ALLOW` on
+  `22/tcp` that `add_*_xrdp.sh` leaves; anything else (an operator's 80/443, a bare `80`, udp, ranges,
+  app profiles) needs an explicit yes. This was verified the hard way — the earlier
+  `ufw_prune_stale_ssh_limit_rules()` silently deleted 80/tcp and 443/tcp on a re-run. `UFW_NUMBERED_RULE_RE`
+  parses every rule shape, not only `N/tcp`: the narrower regex let a bare `ufw allow 80` slip past both the
+  prompt and the "only SSH open" summary. The SSH `LIMIT` rule is re-checked after `ufw --force enable` and
+  its absence is fatal (rollback still armed).
 - **`--confirm-window MINUTES`** arms `hardening-autorevert.timer` before the first access-affecting change; it
-  restores the pre-hardening `/etc/ssh` and disables UFW unless the operator runs
-  `/usr/local/sbin/hardening-confirm`. It is the only mechanism that recovers a server nobody can log into —
-  the printed "test in a new terminal" warning is advice, not recovery.
+  restores the pre-hardening `/etc/ssh` *and* UFW rules/state from the same snapshot (not a blanket
+  `ufw disable`, which would open everything the operator had closed) unless the operator runs
+  `/usr/local/sbin/hardening-confirm`. `rearm_lockout_autorevert()` restarts the timer after each prompt and
+  before the final summary, so time spent answering prompts never eats the window. It is the only mechanism
+  that recovers a server nobody can log into — the printed "test in a new terminal" warning is advice, not
+  recovery.
 - **`save_user_credentials()`** mirrors the password into `/root/.<user>-credentials` (mode 600). An
   auto-generated password otherwise exists only in the operator's scrollback, which strands a reachable
   server with unusable sudo.
@@ -158,7 +165,10 @@ points to preserve when modifying it:
   system account (uid < 1000), to avoid silently escalating a service account.
 - `remove_provider_default_user()` (removes the cloud provider's default account, e.g. `user`) retries
   `pkill` → `pkill -9` → `userdel -rf`, verifying via `id` that the account is actually gone rather than
-  trusting a single command's exit code.
+  trusting a single command's exit code. Keep `pkill` *before* `userdel`: `userdel -f` succeeds with the
+  account's processes still alive, and they keep a uid the next `useradd` may reuse. It refuses (return 1,
+  manual-removal hint at exit) when `SUDO_USER`/`logname` is that account — `pkill` would kill the operator's
+  own session and the script before the summary shows the credentials. `whoami` is useless here (always root).
 - Functions are grouped by section banners (`UI`, prompts, SSH keys, network/systemd, rollback, users, sshd,
   other services) — keep new functions under the matching banner rather than appending at the end.
 - `verify_ssh_port_available`, `verify_sshd_port`, and `verify_ssh_ipv4_only` re-check the *effective* runtime
