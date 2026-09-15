@@ -1,0 +1,13 @@
+[Unit]
+Description=Claude Code auto-ping — opens the 5-hour session window on a schedule (MSK)
+
+[Service]
+# claude and uv live in ~/.local/bin, which a user unit's default PATH lacks
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=__DIR__
+ExecStart=__UV__ run main.py
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target

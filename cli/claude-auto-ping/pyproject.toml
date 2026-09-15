@@ -1,0 +1,11 @@
+[project]
+name = "claude-auto-ping"
+version = "0.1.0"
+description = "Pings Claude Code on a schedule (MSK) to open the 5-hour session window"
+requires-python = ">=3.11"
+dependencies = [
+    "tzdata", # zoneinfo fallback when the system tzdata is missing
+]
+
+[tool.uv]
+package = false
