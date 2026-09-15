@@ -1,34 +1,34 @@
 # claude-auto-ping
 
-По расписанию (МСК: **07:00, 12:01, 17:02, 22:03**) отправляет в Claude Code одно короткое
-сообщение — каждое открывает новое **5-часовое окно сессии** подписки. API-ключ не нужен.
+Sends Claude Code one short message on a schedule (MSK: **07:00, 12:01, 17:02, 22:03**) — each one
+opens a new **5-hour subscription session window**. No API key needed.
 
-Каждый вызов `claude -p` — новый сеанс, поэтому окно стартует заново. Пинг идёт с
-`--no-session-persistence`: сессии не пишутся в `~/.claude` и не плодятся.
+Every `claude -p` call is a new session, so the window starts over. Pings run with
+`--no-session-persistence`: sessions are not written to `~/.claude` and don't pile up.
 
-## Пререквизиты
+## Prerequisites
 
-Claude CLI установлен и выполнен вход (один раз, интерактивно):
+Claude CLI installed and logged in (once, interactively):
 
 ```bash
-curl -fsSL https://claude.ai/install.sh | bash   # ставит в ~/.local/bin/claude
-claude                                            # вход: подписка/логин
-claude -p "hi" --model haiku                      # проверка: должен ответить
+curl -fsSL https://claude.ai/install.sh | bash   # installs to ~/.local/bin/claude
+claude                                            # log in: subscription
+claude -p "hi" --model haiku                      # check: must reply
 ```
 
-## Настройка
+## Setup
 
 ```bash
 cd cli/claude-auto-ping
-uv sync                 # создаст .venv
-uv run main.py --once   # проверка: одно сообщение сейчас и выход
+uv sync                 # creates .venv
+uv run main.py --once   # check: one message now, then exit
 ```
 
-## Автоподъём после перезагрузки (systemd user-юнит)
+## Start on boot (systemd user unit)
 
-Юнит кладётся в `~/.config/systemd/user/` — система не трогается, root не нужен.
-`@reboot` в crontab не подойдёт: `configuring_server.sh` из этого репозитория
-отключает cron для всех, кроме root.
+The unit goes to `~/.config/systemd/user/` — the system is untouched, no root needed.
+`@reboot` in crontab won't do: `configuring_server.sh` from this repository restricts cron to
+root only.
 
 ```bash
 cd cli/claude-auto-ping
@@ -37,33 +37,34 @@ sed "s|__DIR__|$PWD|; s|__UV__|$(command -v uv)|" \
   claude-auto-ping.service.in > ~/.config/systemd/user/claude-auto-ping.service
 systemctl --user daemon-reload
 systemctl --user enable --now claude-auto-ping
-loginctl enable-linger   # юнит стартует после ребута без ручного логина
+loginctl enable-linger   # the unit starts after a reboot without a manual login
 ```
 
-Проверка и логи:
+Status and logs:
 
 ```bash
 systemctl --user status claude-auto-ping
-journalctl --user -u claude-auto-ping -f   # дублируется в ping.log рядом со скриптом
+journalctl --user -u claude-auto-ping -f   # also in ping.log next to the script (rotated, 1 MB × 3)
 ```
 
-## Запуск без systemd (альтернатива)
+## Without systemd (alternative)
 
 ```bash
-nohup uv run main.py >/dev/null 2>&1 &   # не переживёт перезагрузку
+nohup uv run main.py >/dev/null 2>&1 &   # does not survive a reboot
 tmux new -s ping 'uv run main.py'
 ```
 
-## Конфигурация
+## Configuration
 
-Всё в `main.py`:
+All in `main.py`:
 
-| Что                  | Где                         | По умолчанию                     |
-| -------------------- | --------------------------- | -------------------------------- |
-| Слоты отправки (МСК) | `SLOTS`                     | `07:00, 12:01, 17:02, 22:03`     |
-| Модель               | `--model` / `DEFAULT_MODEL` | алиас `haiku` — всегда последняя |
-| Текст сообщения      | `MESSAGE`                   | `hi`                             |
-| Путь к claude        | `--claude`                  | `claude` из PATH                 |
+| What             | Where                       | Default                           |
+| ---------------- | --------------------------- | --------------------------------- |
+| Send slots (MSK) | `SLOTS`                     | `07:00, 12:01, 17:02, 22:03`      |
+| Model            | `--model` / `DEFAULT_MODEL` | `haiku` alias — always the latest |
+| Message text     | `MESSAGE`                   | `hi`                              |
+| Path to claude   | `--claude`                  | `claude` from PATH                |
 
-При ошибке (сеть, таймаут) — до 3 попыток с интервалом 2 минуты. Часовой пояс сервера не
-важен: расписание считается по `Europe/Moscow`.
+On failure (network, timeout) — up to 3 attempts, 2 minutes apart. The server time zone doesn't
+matter: the schedule is computed in `Europe/Moscow`. A slot missed while the machine was off is
+skipped, not caught up — the next ping waits for the following slot.
