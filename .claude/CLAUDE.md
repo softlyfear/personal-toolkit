@@ -23,6 +23,7 @@ it first — the warn-only pattern is intentional, not an oversight.
 ```
 server-scripts/   VPS hardening, system updates, service management, xrdp — PRIMARY FOCUS
 dev-tools/         devsetup script + a copy-paste Makefile template for FastAPI projects — SECONDARY FOCUS
+cli/                small personal Python CLIs (uv-managed), e.g. claude-auto-ping — see "cli/" below
 web3/               Cosmos/Ethereum node helpers — no feature work, see "web3/" note below
 ```
 
@@ -303,6 +304,15 @@ All comments inside the harness itself are in English, per the repo-wide languag
   launches the driver container (plain POSIX, `MSYS_NO_PATHCONV=1` is a harmless no-op outside Git Bash) —
   every actual test step (`lib.sh`, `scenarios.sh`, `run.sh`, `drive.exp`) runs inside Linux containers
   regardless of host OS. Don't reintroduce host-OS-specific paths or tools into `lib.sh`/`scenarios.sh`/`run.sh`.
+
+## `cli/`
+
+Python, not Bash, so `.claude/lint.sh` and `.claude/RULES.md` don't apply — check with `uvx ruff format --check`
+and `uvx ruff check`. Each tool is a uv project (`pyproject.toml` + `uv.lock`, `package = false`); `.venv`,
+`__pycache__` and `*.log` are already gitignored. These run from a clone, not `wget`-piped, so the single-file
+constraint doesn't bind them. `claude-auto-ping` is a user-level systemd unit, never root: `cron` is off the
+table because `configuring_server.sh` restricts it to root. It sleeps in short wall-clock steps
+(`sleep_until`) — a single long `time.sleep()` is monotonic and fires hours late after a suspend.
 
 ## web3/ (out of scope for features, still inside the gate)
 
