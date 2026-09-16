@@ -309,7 +309,8 @@ All comments inside the harness itself are in English, per the repo-wide languag
 
 Python, not Bash, so `.claude/lint.sh` and `.claude/RULES.md` don't apply — check with `uvx ruff format --check`
 and `uvx ruff check`. Each tool is a uv project (`pyproject.toml` + `uv.lock`, `package = false`); `.venv`,
-`__pycache__` and `*.log` are already gitignored. These run from a clone, not `wget`-piped, so the single-file
+`__pycache__`, `*.log` and `*.log.[0-9]` are already gitignored — the rotated-log rule is separate because
+`*.log` does not match `ping.log.1`. These run from a clone, not `wget`-piped, so the single-file
 constraint doesn't bind them. `claude-auto-ping` is a user-level systemd unit, never root: `cron` is off the
 table because `configuring_server.sh` restricts it to root. It sleeps in short wall-clock steps
 (`sleep_until`) — a single long `time.sleep()` is monotonic and fires hours late after a suspend.

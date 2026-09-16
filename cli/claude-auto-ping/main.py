@@ -49,15 +49,25 @@ def setup_logging() -> None:
     )
     # MSK so log lines match the slots on any server TZ; use the record's own time, not now()
     formatter.converter = lambda secs: datetime.fromtimestamp(secs, MSK).timetuple()
-    handlers: list[logging.Handler] = [
-        logging.StreamHandler(),
-        RotatingFileHandler(
-            LOG_PATH, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS, encoding="utf-8"
-        ),
-    ]
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    # A read-only checkout must not take the unit down into a Restart=always loop: journald keeps the log
+    file_error: OSError | None = None
+    try:
+        handlers.append(
+            RotatingFileHandler(
+                LOG_PATH,
+                maxBytes=LOG_MAX_BYTES,
+                backupCount=LOG_BACKUPS,
+                encoding="utf-8",
+            )
+        )
+    except OSError as exc:
+        file_error = exc
     for handler in handlers:
         handler.setFormatter(formatter)
     logging.basicConfig(level=logging.INFO, handlers=handlers)
+    if file_error is not None:
+        log.warning("file logging off (%s): %s", LOG_PATH, file_error)
 
 
 def ping(claude: str, model: str) -> bool:
@@ -101,7 +111,7 @@ def ping_with_retry(claude: str, model: str) -> bool:
                 ATTEMPTS,
                 RETRY_DELAY_S,
             )
-            time.sleep(RETRY_DELAY_S)
+            sleep_until(datetime.now(MSK) + timedelta(seconds=RETRY_DELAY_S))
     return False
 
 
@@ -130,7 +140,8 @@ def main() -> int:
         target = next_slot(datetime.now(MSK))
         log.info("next ping %s MSK", target.strftime("%d.%m %H:%M"))
         sleep_until(target)
-        ping_with_retry(args.claude, args.model)
+        if not ping_with_retry(args.claude, args.model):
+            log.error("slot missed: all %s attempts failed", ATTEMPTS)
 
 
 if __name__ == "__main__":
