@@ -33,7 +33,8 @@ root only.
 ```bash
 cd cli/claude-auto-ping
 mkdir -p ~/.config/systemd/user
-sed "s|__DIR__|$PWD|; s|__UV__|$(command -v uv)|" \
+UV_BIN="$(command -v uv)"
+sed "s|__DIR__|$PWD|; s|__UV__|${UV_BIN:?uv not found in PATH}|" \
   claude-auto-ping.service.in > ~/.config/systemd/user/claude-auto-ping.service
 systemctl --user daemon-reload
 systemctl --user enable --now claude-auto-ping
