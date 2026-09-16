@@ -57,10 +57,6 @@ cover/
 
 # Django stuff:
 *.log
-
-# Docker scenario-suite artefacts: summary.md is not covered by *.log above,
-# and without this the whole directory gets committed.
-.claude/testing/*/results/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -211,3 +207,8 @@ marimo/_lsp/
 __marimo__/
 
 # personal-toolkit: Claude Code test harness output — local diagnostic artifacts, never committed
+# summary.md is not covered by *.log above, so without this the whole directory gets committed.
+.claude/testing/*/results/
+
+# claude-auto-ping rotated logs: *.log above does not match ping.log.1
+*.log.[0-9]
