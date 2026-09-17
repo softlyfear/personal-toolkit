@@ -314,6 +314,10 @@ and `uvx ruff check`. Each tool is a uv project (`pyproject.toml` + `uv.lock`, `
 constraint doesn't bind them. `claude-auto-ping` is a user-level systemd unit, never root: `cron` is off the
 table because `configuring_server.sh` restricts it to root. It sleeps in short wall-clock steps
 (`sleep_until`) — a single long `time.sleep()` is monotonic and fires hours late after a suspend.
+`cli/claude-auto-ping/install.sh` is the exception to "cli/ runs from a clone": it is Bash, inside
+`.claude/lint.sh`, and *is* wget-piped — it clones the repo itself, so it must stay single-file. It
+installs nothing as root and asks nothing; the interactive `claude` login is the one step it can't do,
+so it stops at the test ping instead of enabling a unit that would fail every slot.
 
 ## web3/ (out of scope for features, still inside the gate)
 
