@@ -6,7 +6,20 @@ opens a new **5-hour subscription session window**. No API key needed.
 Every `claude -p` call is a new session, so the window starts over. Pings run with
 `--no-session-persistence`: sessions are not written to `~/.claude` and don't pile up.
 
-## Prerequisites
+## Install on a server (one line)
+
+Run as your normal user, never root. Installs `uv` and the Claude CLI if missing, clones the
+repository to `~/personal-toolkit` (override with `CLAUDE_AUTO_PING_DIR`), sends a test ping, sets up
+the systemd user unit with linger, then verifies all of it:
+
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/cli/claude-auto-ping/install.sh)
+```
+
+The one step it cannot do for you: the CLI must be logged in once, interactively. If it isn't, the
+installer stops at the test ping — run `claude`, complete the login, re-run the installer.
+
+## Prerequisites (manual setup)
 
 Claude CLI installed and logged in (once, interactively):
 
