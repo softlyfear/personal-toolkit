@@ -2,6 +2,9 @@
 #
 # install.sh — install claude-auto-ping as a systemd user unit: no prompts, no root, checks at the end
 #
+# Two steps, same command: step 1 installs uv and the Claude CLI and checks the login; if the CLI is
+# not logged in it stops there (exit 0) and tells you to run `claude`. Re-running does step 2.
+#
 # Usage:  bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/cli/claude-auto-ping/install.sh)
 #         CLAUDE_AUTO_PING_DIR=/opt/ping bash <(wget -qO- ...)   # install somewhere else
 # Requires: wget, python3, a systemd user session; never root
@@ -22,6 +25,8 @@ readonly LOCAL_BIN="${HOME}/.local/bin"
 readonly UNIT_DIR="${HOME}/.config/systemd/user"
 readonly INSTALL_DIR="${CLAUDE_AUTO_PING_DIR:-${HOME}/.local/share/claude-auto-ping}"
 readonly JOURNAL_WAIT_S=10
+# Keep in sync with DEFAULT_MODEL in main.py — the login check must use the model the unit will use
+readonly PING_MODEL="haiku"
 # The whole application: no clone, nothing else from the repository is needed at run time
 readonly APP_FILES=("main.py" "pyproject.toml" "uv.lock" "${UNIT_NAME}.in")
 
@@ -138,14 +143,29 @@ sync_dependencies() {
   ok "Python dependencies synced"
 }
 
-# The only way to tell a logged-in CLI from a logged-out one, and it is the smoke test too
-verify_ping() {
-  local app_dir="$1"
+# A real message is the only way to tell a logged-in CLI from a logged-out one; it doubles as the
+# smoke test. claude -p reports a refusal on stdout, so both streams are captured.
+verify_login() {
+  local output="" status=0
 
-  info "Sending one test ping — this already opens a session window..."
-  (cd "${app_dir}" && uv run --quiet main.py --once) \
-    || err "Test ping failed — the ERROR line above carries the reason claude reported. If it is about login, run 'claude' once interactively, then re-run this installer"
-  ok "Test ping delivered"
+  info "Checking the login with one real message — this already opens a session window..."
+  output="$(claude -p "hi" --model "${PING_MODEL}" --no-session-persistence 2>&1)" || status=$?
+  if [[ "${status}" -eq 0 ]]; then
+    ok "Logged in · reply: ${output:0:80}"
+    return 0
+  fi
+
+  warn "claude exited ${status}: ${output:0:200}"
+  return 1
+}
+
+print_login_instructions() {
+  ok "Step 1 of 2 done — uv and the Claude CLI are in place"
+  info "Now log in once, interactively, as this same user:"
+  echo "  claude"
+  echo ""
+  echo "On a headless server the CLI prints a URL: open it in a browser on your own machine,"
+  echo "authorise, paste the code back. Then re-run this installer to finish step 2."
 }
 
 # =============================================================================
@@ -241,13 +261,20 @@ main() {
   ensure_local_bin_on_path
   user_name="$(id -un)"
 
+  info "Step 1 of 2: tools and login"
   ensure_uv
   ensure_claude
+  # Nothing is downloaded or installed until the login works: a logged-out CLI ends step 1 cleanly
+  # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+  if ! verify_login; then
+    print_login_instructions
+    return 0
+  fi
 
+  info "Step 2 of 2: application, unit, checks"
   app_dir="${INSTALL_DIR}"
   fetch_app_files "${app_dir}"
   sync_dependencies "${app_dir}"
-  verify_ping "${app_dir}"
 
   install_unit "${app_dir}"
   enable_linger

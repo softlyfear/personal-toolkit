@@ -17,9 +17,16 @@ linger, then verifies all of it:
 bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/cli/claude-auto-ping/install.sh)
 ```
 
-The one step it cannot do for you: the CLI must be logged in once, interactively. If it isn't, the
-installer stops at the test ping and prints what `claude` reported — fix that, then re-run the
-installer. Re-running is also how you update: it refetches the four files and restarts the unit.
+It runs in two steps, same command both times, because the interactive login is the one thing it
+cannot do for you:
+
+1. **Tools and login.** Installs `uv` and the Claude CLI, then sends one real message to check the
+   login. If the CLI is not logged in, it prints what `claude` said and stops right there — nothing
+   is downloaded, nothing is installed, exit code 0. Run `claude`, log in, go to step 2.
+2. **Application and unit.** Re-run the same command: it fetches the files, renders the unit, enables
+   linger and prints the checks.
+
+Re-running is also how you update: it refetches the four files and restarts the unit.
 
 ## Prerequisites (manual setup)
 
