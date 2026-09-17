@@ -191,7 +191,8 @@ make help
 
 Pings Claude Code on a schedule (MSK: `07:00` · `12:01` · `17:02` · `22:03`) — each message opens a new 5-hour session window. `uv` + venv · no API key · auto-start via systemd user unit.
 
-**Install** — as your normal user, never root. Requires a Claude CLI logged in once, interactively.
+**Install** — as your normal user, never root. Same command twice: the first run installs the tools and
+stops if the Claude CLI is not logged in yet, the second finishes the setup.
 
 ```bash
 bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/cli/claude-auto-ping/install.sh)
