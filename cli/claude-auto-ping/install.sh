@@ -3,10 +3,11 @@
 # install.sh — install claude-auto-ping as a systemd user unit: no prompts, no root, checks at the end
 #
 # Usage:  bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/cli/claude-auto-ping/install.sh)
-#         CLAUDE_AUTO_PING_DIR=/srv/toolkit bash <(wget -qO- ...)   # clone somewhere else
-# Requires: wget, git, a systemd user session; never root
+#         CLAUDE_AUTO_PING_DIR=/opt/ping bash <(wget -qO- ...)   # install somewhere else
+# Requires: wget, python3, a systemd user session; never root
 # Uninstall: systemctl --user disable --now claude-auto-ping
 #            rm ~/.config/systemd/user/claude-auto-ping.service
+#            rm -rf ~/.local/share/claude-auto-ping
 #
 set -euo pipefail
 IFS=$'\n\t'
@@ -15,13 +16,14 @@ IFS=$'\n\t'
 # Constants
 # =============================================================================
 
-readonly REPO_URL="https://github.com/softlyfear/personal-toolkit.git"
-readonly APP_SUBDIR="cli/claude-auto-ping"
+readonly RAW_BASE="https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/cli/claude-auto-ping"
 readonly UNIT_NAME="claude-auto-ping.service"
 readonly LOCAL_BIN="${HOME}/.local/bin"
 readonly UNIT_DIR="${HOME}/.config/systemd/user"
-readonly INSTALL_DIR="${CLAUDE_AUTO_PING_DIR:-${HOME}/personal-toolkit}"
+readonly INSTALL_DIR="${CLAUDE_AUTO_PING_DIR:-${HOME}/.local/share/claude-auto-ping}"
 readonly JOURNAL_WAIT_S=10
+# The whole application: no clone, nothing else from the repository is needed at run time
+readonly APP_FILES=("main.py" "pyproject.toml" "uv.lock" "${UNIT_NAME}.in")
 
 # =============================================================================
 # UI helpers
@@ -46,7 +48,7 @@ require_preconditions() {
   [[ "${uid}" -ne 0 ]] \
     || err "Run as your normal user, not root: the unit is user-level and the login token lives in \${HOME}/.claude"
 
-  for required_cmd in wget git mktemp sed systemctl loginctl; do
+  for required_cmd in wget python3 mktemp mv sed systemctl loginctl; do
     command -v "${required_cmd}" > /dev/null 2>&1 \
       || err "Required command not found: ${required_cmd}"
   done
@@ -103,26 +105,29 @@ ensure_claude() {
 }
 
 # =============================================================================
-# Repository and dependencies
+# Application files and dependencies
 # =============================================================================
 
-sync_repo() {
-  local remote=""
+fetch_app_files() {
+  local app_dir="$1" tmp_dir="" file=""
 
-  if [[ -d "${INSTALL_DIR}/.git" ]]; then
-    remote="$(git -C "${INSTALL_DIR}" remote get-url origin 2> /dev/null || true)"
-    [[ "${remote}" == *"personal-toolkit"* ]] \
-      || err "${INSTALL_DIR} is a git repo with origin '${remote}' — set CLAUDE_AUTO_PING_DIR to another path"
-    git -C "${INSTALL_DIR}" pull --ff-only --quiet \
-      || warn "git pull failed; continuing with the revision already checked out"
-    ok "Repository up to date: ${INSTALL_DIR}"
-    return 0
-  fi
+  tmp_dir="$(mktemp -d)"
+  # Self-clearing: a RETURN trap otherwise fires again when the caller returns.
+  trap 'rm -rf "${tmp_dir:-}"; trap - RETURN' RETURN
 
-  [[ ! -e "${INSTALL_DIR}" ]] \
-    || err "${INSTALL_DIR} exists and is not a git clone — set CLAUDE_AUTO_PING_DIR to another path"
-  git clone --quiet "${REPO_URL}" "${INSTALL_DIR}" || err "git clone failed"
-  ok "Repository cloned: ${INSTALL_DIR}"
+  for file in "${APP_FILES[@]}"; do
+    wget -qO "${tmp_dir}/${file}" "${RAW_BASE}/${file}" || err "Failed to download ${file}"
+    [[ -s "${tmp_dir}/${file}" ]] || err "Downloaded ${file} is empty"
+  done
+  # A truncated main.py would otherwise surface hours later, at the first slot
+  python3 -m py_compile "${tmp_dir}/main.py" > /dev/null 2>&1 \
+    || err "Downloaded main.py failed a syntax check (possibly corrupted/tampered)"
+
+  mkdir -p "${app_dir}" || err "Cannot create ${app_dir}"
+  for file in "${APP_FILES[@]}"; do
+    mv -f "${tmp_dir}/${file}" "${app_dir}/${file}"
+  done
+  ok "Application files in ${app_dir} (${#APP_FILES[@]} files, no repository clone)"
 }
 
 sync_dependencies() {
@@ -139,7 +144,7 @@ verify_ping() {
 
   info "Sending one test ping — this already opens a session window..."
   (cd "${app_dir}" && uv run --quiet main.py --once) \
-    || err "Test ping failed. Most likely the CLI is not logged in: run 'claude' once interactively, then re-run this installer"
+    || err "Test ping failed — the ERROR line above carries the reason claude reported. If it is about login, run 'claude' once interactively, then re-run this installer"
   ok "Test ping delivered"
 }
 
@@ -155,8 +160,10 @@ install_unit() {
   sed "s|__DIR__|${app_dir}|; s|__UV__|${uv_bin}|" "${app_dir}/${UNIT_NAME}.in" \
     > "${UNIT_DIR}/${UNIT_NAME}" || err "Failed to render ${UNIT_DIR}/${UNIT_NAME}"
   systemctl --user daemon-reload
-  systemctl --user enable --now "${UNIT_NAME}" > /dev/null 2>&1 \
-    || err "systemctl --user enable --now ${UNIT_NAME} failed"
+  systemctl --user enable "${UNIT_NAME}" > /dev/null 2>&1 \
+    || err "systemctl --user enable ${UNIT_NAME} failed"
+  # restart, not start: on a re-run the old process still holds the previous main.py
+  systemctl --user restart "${UNIT_NAME}" || err "systemctl --user restart ${UNIT_NAME} failed"
   ok "Unit installed and started"
 }
 
@@ -236,9 +243,9 @@ main() {
 
   ensure_uv
   ensure_claude
-  sync_repo
 
-  app_dir="${INSTALL_DIR}/${APP_SUBDIR}"
+  app_dir="${INSTALL_DIR}"
+  fetch_app_files "${app_dir}"
   sync_dependencies "${app_dir}"
   verify_ping "${app_dir}"
 
@@ -250,7 +257,7 @@ main() {
   echo "Directory: ${app_dir}"
   echo "Logs:      journalctl --user -u ${UNIT_NAME} -f"
   echo "Missed:    journalctl --user -u ${UNIT_NAME} -p err"
-  echo "Update:    git -C ${INSTALL_DIR} pull && systemctl --user restart ${UNIT_NAME}"
+  echo "Update:    re-run this installer"
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

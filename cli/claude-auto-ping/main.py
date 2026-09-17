@@ -90,8 +90,10 @@ def ping(claude: str, model: str) -> bool:
         return False
     took = time.monotonic() - started
     if proc.returncode != 0:
+        # claude -p reports a refusal (bad model, usage limit, no login) on stdout, not stderr
+        reason = " ".join((proc.stdout + " " + proc.stderr).split())[:300]
         log.error(
-            "exit %s after %.1fs · %s", proc.returncode, took, proc.stderr.strip()[:300]
+            "exit %s after %.1fs · %s", proc.returncode, took, reason or "no output"
         )
         return False
     log.info(
