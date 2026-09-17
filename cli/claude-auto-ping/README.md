@@ -8,16 +8,18 @@ Every `claude -p` call is a new session, so the window starts over. Pings run wi
 
 ## Install on a server (one line)
 
-Run as your normal user, never root. Installs `uv` and the Claude CLI if missing, clones the
-repository to `~/personal-toolkit` (override with `CLAUDE_AUTO_PING_DIR`), sends a test ping, sets up
-the systemd user unit with linger, then verifies all of it:
+Run as your normal user, never root. Installs `uv` and the Claude CLI if missing, fetches the four
+files this tool actually needs into `~/.local/share/claude-auto-ping` (override with
+`CLAUDE_AUTO_PING_DIR`) — no repository clone — sends a test ping, sets up the systemd user unit with
+linger, then verifies all of it:
 
 ```bash
 bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/cli/claude-auto-ping/install.sh)
 ```
 
 The one step it cannot do for you: the CLI must be logged in once, interactively. If it isn't, the
-installer stops at the test ping — run `claude`, complete the login, re-run the installer.
+installer stops at the test ping and prints what `claude` reported — fix that, then re-run the
+installer. Re-running is also how you update: it refetches the four files and restarts the unit.
 
 ## Prerequisites (manual setup)
 
