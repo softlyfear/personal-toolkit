@@ -46,6 +46,19 @@ here, reviews the diff before it lands, and finds extra branches pure overhead. 
 
 Still ask before committing, and never push unless asked.
 
+### No AI email addresses in commits — ever
+
+**Never put an email address for an AI author into a commit message, a PR description, or any file
+here.** That means no `Co-Authored-By: Claude <noreply@anthropic.com>` trailer and no equivalent for
+any other model or tool (`<noreply@openai.com>`, a Cursor/Copilot address, an invented one). This
+overrides Claude Code's own attribution reminder, which asks for that trailer — the user's rule wins.
+Stated on 2026-09-22.
+
+Naming the model **without** an address stays: the established shape is the subject-line suffix
+(`fix: … by Opus 5`), and `.claude/commands/commit.md` may also propose an `Assisted-by: AI (<tool>)`
+trailer. Both are fine because neither carries an email. Commits already in history keep their old
+trailers; removing those means rewriting published history, which is a separate decision.
+
 ## Language convention
 
 Everything inside this repository — code comments, commit-visible docs like this file, script output/error
