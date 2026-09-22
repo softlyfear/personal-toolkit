@@ -1,22 +1,24 @@
 # Tests
 
-Two layers, deliberately split by what each can actually prove.
+> Two layers, deliberately split by what each can actually prove.
 
-| Layer | Location | Runs | Proves |
-|---|---|---|---|
-| Unit | `.claude/testing/unit/*.bats` | `bats .claude/testing/unit/` (seconds) | Pure logic: parsing, validation, sanitising, formatting |
-| Scenario | `.claude/testing/<suite>/` | Docker, `run.sh` per suite (minutes to hours) | Real behaviour of systemctl / ufw / fail2ban / sshd / apt |
+| Layer    | Location                      | Runs                                          | Proves                                                     |
+| -------- | ----------------------------- | ----------------------------------------------- | ---------------------------------------------------------- |
+| Unit     | `.claude/testing/unit/*.bats` | `bats .claude/testing/unit/` (seconds)        | Pure logic: parsing, validation, sanitising, formatting     |
+| Scenario | `.claude/testing/<suite>/`    | Docker, `run.sh` per suite (minutes to hours) | Real behaviour of systemctl / ufw / fail2ban / sshd / apt   |
 
-Both are gated by `.claude/lint.sh`, which runs `shfmt -d`, then
-`shellcheck -x -S style`, then `bats .claude/testing/unit/`, and fails on any non-zero exit.
+Both are gated by `.claude/lint.sh`, which runs `shfmt -d`, then `shellcheck -x -S style`, then
+`bats .claude/testing/unit/`, and fails on any non-zero exit.
+
+---
 
 ## Unit layer
 
-Scripts are single-file and wget-piped, so there is no `lib/` to import. Each script
-instead carries a main-guard, which lets a test `source` it, reach its functions, and never
-execute `main`. `.claude/testing/unit/helper.bash` provides `source_script` and restores the default `IFS`
-afterwards — the scripts set `IFS=$'\n\t'`, and letting that leak into bats breaks its
-failure reporting (a failing test silently disappears instead of being reported).
+Scripts are single-file and wget-piped, so there is no `lib/` to import. Each script instead carries a
+main-guard, which lets a test `source` it, reach its functions, and never execute `main`.
+`.claude/testing/unit/helper.bash` provides `source_script` and restores the default `IFS` afterwards — the
+scripts set `IFS=$'\n\t'`, and letting that leak into bats breaks its failure reporting (a failing test
+silently disappears instead of being reported).
 
 External commands are shadowed by functions inside the test rather than mocked on disk.
 
@@ -29,40 +31,38 @@ External commands are shadowed by functions inside the test rather than mocked o
 | `install_dev_tools.bats` | `install-dev-tools.sh` — usage, `need_cmd`, tool list ↔ installer function consistency |
 | `xrdp.bats` | `add_xfce_xrdp.sh`, `add_gnome_xrdp.sh` — UI helpers, `setup_sudo` privilege selection, dpkg-lock wait, RDP port and PAM constants |
 
-Functions that mutate the system (apt, systemctl, ufw, userdel, sshd config) are
-intentionally absent here — a unit test asserting against a mocked `systemctl` proves only
-that the mock was called. Those live in the scenario layer.
+Functions that mutate the system (apt, systemctl, ufw, userdel, sshd config) are intentionally absent here —
+a unit test asserting against a mocked `systemctl` proves only that the mock was called. Those live in the
+scenario layer.
 
 ## Scenario layer
 
-Five Docker suites, each with a driver container (docker CLI + expect) driving a disposable
-systemd target container. 62 scenarios total: `own-script` 20, `devsetup` 12, `svcctl` 11,
-`xrdp` 10, `sysupdate` 9.
+Five Docker suites, each with a driver container (docker CLI + expect) driving a disposable systemd target
+container. 62 scenarios total: `own-script` 20, `devsetup` 12, `svcctl` 11, `xrdp` 10, `sysupdate` 9.
 
-Two scenarios exercise `rollback_on_failure()`, and they are not redundant.
-`19_ROLLBACK_ON_FAILURE` forces a deterministic failure in step 6 (a `fail2ban.service`
-drop-in with `ExecStartPre=/bin/false`, written before the unit exists) and asserts the box
-is back where it started. `20_ROLLBACK_UFW_MIDSTEP` fails the *first* `ufw ... enable` via a
-pass-through wrapper, so the run dies partway through step 5 — the window where the rollback
-flag used to be unset, leaving default policies flipped and pruned rules gone. Both compare
-`ufw status verbose` byte-for-byte against a snapshot taken before the run.
+Two scenarios exercise `rollback_on_failure()`, and they are not redundant. `19_ROLLBACK_ON_FAILURE` forces
+a deterministic failure in step 6 (a `fail2ban.service` drop-in with `ExecStartPre=/bin/false`, written
+before the unit exists) and asserts the box is back where it started. `20_ROLLBACK_UFW_MIDSTEP` fails the
+*first* `ufw ... enable` via a pass-through wrapper, so the run dies partway through step 5 — the window
+where the rollback flag used to be unset, leaving default policies flipped and pruned rules gone. Both
+compare `ufw status verbose` byte-for-byte against a snapshot taken before the run.
 
-Killing a run with SIGKILL does **not** test any of this: bash cannot trap SIGKILL, so the
-EXIT trap never fires and nothing is rolled back.
+Killing a run with SIGKILL does **not** test any of this: bash cannot trap SIGKILL, so the EXIT trap never
+fires and nothing is rolled back.
 
-Both scenarios were re-run on a live VPS on 2026-08-19 by arming the same `fail2ban` drop-in
-and driving the dialog through remote `tmux`. That run found what neither container catches:
-the target image is not socket-activated, so nothing noticed that `restart_sshd_service()`
-enables `ssh.service` permanently while Ubuntu boots sshd from `ssh.socket`. The rollback now
-records the prior `is-enabled` value and restores it, but only once `ssh.socket` is re-enabled
-to take over at boot — verified by rebooting the VPS and confirming the original topology came
-back with SSH reachable.
+Both scenarios were re-run on a live VPS on 2026-08-19 by arming the same `fail2ban` drop-in and driving the
+dialog through remote `tmux`. That run found what neither container catches: the target image is not
+socket-activated, so nothing noticed that `restart_sshd_service()` enables `ssh.service` permanently while
+Ubuntu boots sshd from `ssh.socket`. The rollback now records the prior `is-enabled` value and restores it,
+but only once `ssh.socket` is re-enabled to take over at boot — verified by rebooting the VPS and confirming
+the original topology came back with SSH reachable.
+
+---
 
 ## What Docker cannot prove — VPS only
 
-The scenario suites run in containers sharing the host kernel, in their own network
-namespace, with no external client. The following therefore need a real VPS and are
-**not** covered by any automated layer:
+The scenario suites run in containers sharing the host kernel, in their own network namespace, with no
+external client. The following therefore need a real VPS and are **not** covered by any automated layer:
 
 | Area | Why a container cannot prove it | How to verify on a VPS |
 |---|---|---|
@@ -81,9 +81,9 @@ namespace, with no external client. The following therefore need a real VPS and 
 ## Running
 
 ```bash
-bash .claude/lint.sh                 # format + lint + unit tests
-bats .claude/testing/unit/                           # unit tests only
+bash .claude/lint.sh          # format + lint + unit tests
+bats .claude/testing/unit/    # unit tests only
 ```
 
-Scenario suites are driven from `.claude/` tooling; see
-`.claude/commands/test_own_script.md` for the exact `docker run` invocation.
+Scenario suites are driven from `.claude/` tooling; see `.claude/commands/test_own_script.md` for the exact
+`docker run` invocation.
