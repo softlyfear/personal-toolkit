@@ -16,15 +16,19 @@
 
 ## Quick start
 
-| Goal                                  | One-liner                                                       |
-| ------------------------------------- | --------------------------------------------------------------- |
-| Harden a fresh VPS                    | `bash <(wget -qO- .../server-scripts/configuring_server.sh)`    |
-| Update everything (apt + snap + flat) | `bash <(wget -qO- .../server-scripts/update_system_all.sh)`     |
-| Install dev tools                     | `bash <(wget -qO- .../dev-tools/install-dev-tools.sh)`          |
-| Add a remote desktop                  | `bash <(wget -qO- .../server-scripts/add_xfce_xrdp.sh)`         |
+```bash
+# Harden a fresh VPS
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/server-scripts/configuring_server.sh)
 
-`...` stands for `https://raw.githubusercontent.com/softlyfear/personal-toolkit/main` — the full URLs are
-in the sections below.
+# Update everything (apt + snap + flatpak)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/server-scripts/update_system_all.sh)
+
+# Install dev tools
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/dev-tools/install-dev-tools.sh)
+
+# Add a remote desktop (XFCE)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/server-scripts/add_xfce_xrdp.sh)
+```
 
 ## Contributing
 
@@ -71,33 +75,8 @@ Full reference — [`server-scripts/README.md`](server-scripts/README.md)
 bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/server-scripts/configuring_server.sh)
 ```
 
-Default port `2244/tcp` · custom port · optional flags:
-
-```bash
-bash <(wget -qO- .../configuring_server.sh) 2255
-bash <(wget -qO- .../configuring_server.sh) --user softly --password-file /root/.new-user-pass
-bash <(wget -qO- .../configuring_server.sh) -u admin -p 'StrongP@ssw0rd!'
-bash <(wget -qO- .../configuring_server.sh) 2255 --confirm-window 10
-```
-
-Without flags: username prompt · password step asks **generate secure password?** (default yes) or manual
-entry · credentials in the summary.
-
-<details>
-<summary><strong>All flags</strong></summary>
-
-<br>
-
-| Flag               | Short | Value     | Default            | Description                                                                                                                                                                                            |
-| ------------------ | ----- | --------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| _(positional)_     |       | `port`    | `2244`             | SSH port                                                                                                                                                                                               |
-| `--user`           | `-u`  | `NAME`    | prompt → `admin`   | sudo username (`root` not allowed)                                                                                                                                                                     |
-| `--password-file`  |       | `PATH`    | —                  | password from a file — recommended for automation, keeps it out of `ps`/shell history                                                                                                                  |
-| `--password`       | `-p`  | `PASS`    | prompt or generate | user password — skips the password step. Visible via `ps`/`/proc` while the script runs; prefer `--password-file`                                                                                      |
-| `--confirm-window` |       | `MINUTES` | off                | arm an auto-revert: SSH config and firewall return to their pre-hardening state after `MINUTES` (5–1440) unless you run `sudo /usr/local/sbin/hardening-confirm`. Use it when you have no console access |
-| `--help`           | `-h`  |           |                    | show help and exit                                                                                                                                                                                     |
-
-</details>
+Default port `2244/tcp`. Custom port, `--user`, `--password-file`, `--confirm-window` and the rest —
+[flags reference](server-scripts/README.md#flags).
 
 **Connect**
 
@@ -179,15 +158,11 @@ Full reference — [`dev-tools/README.md`](dev-tools/README.md)
 Packages: `git` · `uv` · `make` · `docker` · `postgresql`
 
 ```bash
-# all (default)
 bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/dev-tools/install-dev-tools.sh)
-
-# selected
-bash <(wget -qO- .../install-dev-tools.sh) git uv
-
-# interactive
-bash <(wget -qO- .../install-dev-tools.sh) --interactive
 ```
+
+Installs everything by default. Selected tools and `--interactive` —
+[`dev-tools/README.md`](dev-tools/README.md#install-dev-toolssh).
 
 ### FastAPI Makefile
 

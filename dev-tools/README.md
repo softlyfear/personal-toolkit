@@ -15,11 +15,16 @@ Installs `git`, `uv`, `make`, `postgresql` and `docker` on Ubuntu (latest LTS). 
 fatal; a non-`ubuntu` `/etc/os-release` `ID` only warns. Needs root or `sudo`.
 
 ```bash
+# everything
 bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/dev-tools/install-dev-tools.sh)
 
-bash <(wget -qO- .../install-dev-tools.sh) git uv        # only these two
-bash <(wget -qO- .../install-dev-tools.sh) --interactive # ask y/N per tool
-bash <(wget -qO- .../install-dev-tools.sh) --help
+# only these two
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/dev-tools/install-dev-tools.sh) git uv
+
+# ask y/N per tool
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/dev-tools/install-dev-tools.sh) --interactive
+
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/dev-tools/install-dev-tools.sh) --help
 ```
 
 No argument means `--all`. `postgres` and `pg` are accepted as aliases for `postgresql`; an unknown name

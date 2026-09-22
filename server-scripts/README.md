@@ -44,10 +44,17 @@ The flagship. Takes a freshly provisioned VPS where you log in as `root` and lea
 key-authenticated sudo user, a closed firewall and no root SSH.
 
 ```bash
-bash <(wget -qO- .../configuring_server.sh)                  # port 2244, all prompts
-bash <(wget -qO- .../configuring_server.sh) 2255             # custom port
-bash <(wget -qO- .../configuring_server.sh) --user softly --password-file /root/.new-user-pass
-bash <(wget -qO- .../configuring_server.sh) 2255 --confirm-window 10
+# port 2244, all prompts
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/server-scripts/configuring_server.sh)
+
+# custom port
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/server-scripts/configuring_server.sh) 2255
+
+# user and password without prompts
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/server-scripts/configuring_server.sh) --user softly --password-file /root/.new-user-pass
+
+# custom port + auto-revert if you lose access
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/server-scripts/configuring_server.sh) 2255 --confirm-window 10
 ```
 
 ## Flags
@@ -215,8 +222,11 @@ shred -u /root/.admin-credentials     # once the password is stored elsewhere
 Ends with a reboot notice if `/var/run/reboot-required` exists.
 
 ```bash
-bash <(wget -qO- .../update_system_all.sh)      # one-time
-bash <(wget -qO- .../install_sysupdate.sh)      # then: sysupdate
+# one-time
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/server-scripts/update_system_all.sh)
+
+# install the global command, then run: sysupdate
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/server-scripts/install_sysupdate.sh)
 ```
 
 The installer downloads `update_system_all.sh`, compares its SHA256 against a pinned `EXPECTED_SHA256`, runs
@@ -231,7 +241,7 @@ A deliberately small `systemctl` wrapper: the action must be one of
 the whole point of the script.
 
 ```bash
-bash <(wget -qO- .../install_svcctl.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/server-scripts/install_svcctl.sh)
 
 svcctl status all
 svcctl start postgresql
@@ -263,7 +273,7 @@ The same script twice, differing only in the desktop: `ubuntu-gnome-desktop` wit
 a small VPS.
 
 ```bash
-bash <(wget -qO- .../add_xfce_xrdp.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/server-scripts/add_xfce_xrdp.sh)
 ```
 
 **Order of operations, and it matters:** system update → install UFW → *make sure the current SSH port stays
