@@ -30,8 +30,6 @@ DEFAULT_MODEL = {
     OPENAI_COMPATIBLE: "gpt-4.1",
 }
 
-PROFILES = ("lossless", "balanced", "aggressive")
-
 DEFAULT_MAX_TOKENS = 8000
 DEFAULT_TIMEOUT_S = 600
 DEFAULT_CHUNK_CHARS = 6000
@@ -56,9 +54,8 @@ class Config:
     work_dir: Path
     max_part_mb: float = 30.0
     max_part_pages: int = 100
-    profile: str = "balanced"
-    target_dpi: int = 150
-    jpeg_quality: int = 80
+    target_dpi: int = 200
+    jpeg_quality: int = 85
     verify_sample_pages: int = 12
     verify_dpi: int = 150
     ocr_enabled: bool = True
@@ -158,7 +155,6 @@ def load(
     *,
     task_dir: str | None = None,
     result_dir: str | None = None,
-    profile: str | None = None,
     max_part_mb: float | None = None,
     max_part_pages: int | None = None,
     provider: str | None = None,
@@ -170,10 +166,6 @@ def load(
     split = data.get("split", {}) if isinstance(data.get("split"), dict) else {}
     comp = data.get("compress", {}) if isinstance(data.get("compress"), dict) else {}
     ocr = data.get("ocr", {}) if isinstance(data.get("ocr"), dict) else {}
-
-    resolved_profile = str(_pick(profile, "PDFPREP_PROFILE", comp.get("profile"), "balanced"))
-    if resolved_profile not in PROFILES:
-        raise PdfPrepError(f"Unknown compress profile {resolved_profile!r}; expected {PROFILES}")
 
     languages = ocr.get("languages") or ["en", "ru"]
     if isinstance(languages, str):
@@ -196,9 +188,8 @@ def load(
             _pick(max_part_pages, "PDFPREP_MAX_PART_PAGES", split.get("max_part_pages"), 100),
             "max_part_pages",
         ),
-        profile=resolved_profile,
-        target_dpi=_as_int(comp.get("target_dpi", 150), "target_dpi"),
-        jpeg_quality=_as_int(comp.get("jpeg_quality", 80), "jpeg_quality"),
+        target_dpi=_as_int(comp.get("target_dpi", 200), "target_dpi"),
+        jpeg_quality=_as_int(comp.get("jpeg_quality", 85), "jpeg_quality"),
         verify_sample_pages=_as_int(comp.get("verify_sample_pages", 12), "verify_sample_pages"),
         verify_dpi=_as_int(comp.get("verify_dpi", 150), "verify_dpi"),
         ocr_enabled=bool(ocr.get("enabled", True)),

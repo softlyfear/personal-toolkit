@@ -6,7 +6,7 @@ import contextlib
 import json
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pymupdf
@@ -15,7 +15,13 @@ from pdfprep.ui import PdfPrepError, warn
 
 MB = 1_000_000
 TEXT_PAGE_MIN_CHARS = 20
-ARTIFACT_MARKERS = ("--part_", "--manifest.", "--document", "--translated", "--compressed")
+ARTIFACT_MARKERS = ("--part_", "--manifest.", "--document", "--translated")
+
+# OCR swaps Latin letters for their Cyrillic twins at random: "TCHK" and "ТCHK" are one header
+_LOOKALIKES = str.maketrans("аеорсухтнмвк", "aeopcyxthmbk")
+_FILE_NAME = re.compile(r"^[\w .()-]+\.(pdf|docx?|xlsx?|pptx?|txt)$", re.IGNORECASE)
+_CAPTION = re.compile(r"^(рис|fig|табл|tab)\w*\b", re.IGNORECASE)
+_LEADER = re.compile(r"(\.\s?){4,}")
 
 _CYRILLIC = {
     "а": "a",
@@ -100,6 +106,7 @@ class DocInfo:
     text_pages: int
     sections: list[Section]
     toc_source: str  # toc_json | bookmarks | heuristic
+    renamed_sections: int = 0  # bookmarks named after files, replaced with the page heading
 
 
 def open_doc(path: Path) -> pymupdf.Document:
@@ -152,33 +159,141 @@ def _sections_from_bookmarks(doc: pymupdf.Document) -> list[Section] | None:
     return out or None
 
 
-def _sections_heuristic(doc: pymupdf.Document) -> list[Section]:
-    """Largest-font short line on a page, when it stands out from the body text."""
-    sizes: list[float] = []
-    per_page: list[tuple[float, str]] = []
-    for page in doc:
-        best_size, best_text = 0.0, ""
-        for block in page.get_text("dict").get("blocks", []):
-            for line in block.get("lines", []):
-                text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
-                if not text or len(text) > 90:
-                    continue
-                size = max((span.get("size", 0.0) for span in line.get("spans", [])), default=0.0)
-                sizes.append(size)
-                if size > best_size:
-                    best_size, best_text = size, text
-        per_page.append((best_size, best_text))
-    if not sizes:
-        return [Section(0, "Document", 1)]
-    body = sorted(sizes)[len(sizes) // 2]
-    out = [
-        Section(index, text, 1)
-        for index, (size, text) in enumerate(per_page)
-        if text and size >= body * 1.15
+def _page_lines(page: pymupdf.Page) -> list[tuple[float, str]]:
+    """Lines in reading order, each with its largest span size rounded to 0.5 pt.
+
+    Rounding matters for OCR'd pages: every word gets a float size from its own box, so
+    two lines of one wrapped title never compare equal without it.
+    """
+    lines: list[tuple[float, str]] = []
+    for block in page.get_text("dict").get("blocks", []):
+        for line in block.get("lines", []):
+            spans = line.get("spans", [])
+            text = " ".join("".join(span.get("text", "") for span in spans).split())
+            if text:
+                size = max((span.get("size", 0.0) for span in spans), default=0.0)
+                lines.append((round(size * 2) / 2, text))
+    return lines
+
+
+def _line_key(text: str) -> str:
+    return "".join(text.lower().translate(_LOOKALIKES).split())
+
+
+def _running_keys(pages: list[list[tuple[float, str]]]) -> set[str]:
+    """Headers, footers and logos: text repeated on a quarter of the pages or more.
+
+    A logo is often the largest text on every page; left in, it would open a section on
+    each of them.
+    """
+    counts: dict[str, int] = {}
+    for lines in pages:
+        for key in {_line_key(text) for _, text in lines}:
+            counts[key] = counts.get(key, 0) + 1
+    threshold = max(3, len(pages) // 4)
+    return {key for key, count in counts.items() if count >= threshold}
+
+
+def _never_a_title(text: str) -> bool:
+    return bool(_LEADER.search(text) or _CAPTION.match(text) or re.search(r"[;:©]", text))
+
+
+def _is_title(text: str) -> bool:
+    letters = [char for char in text if char.isalpha()]
+    return len(letters) >= 3 and letters[0].isupper() and text[0].isalnum()
+
+
+def _opens_lower(text: str) -> bool:
+    return next((char.islower() for char in text if char.isalpha()), False)
+
+
+def _page_headings(lines: list[tuple[float, str]], running: set[str], body: float) -> list[str]:
+    """Headings on a page, largest size first; an empty list rather than a guess.
+
+    Size groups are tried top-down while they stand out from the body text, because the
+    largest text on a page is often a figure label or a stray OCR fragment and the real
+    heading sits one size below it. A wrong title in the index misleads more than a
+    missing one, hence every filter here errs towards returning nothing.
+    """
+    # Filtered before grouping: a bullet glyph or a part number set at the heading's size
+    # would otherwise inflate its group into a "paragraph" and hide the heading.
+    lines = [
+        (size, text)
+        for size, text in lines
+        if len(text) <= 90
+        and sum(char.isalpha() for char in text) >= 3
+        and _line_key(text) not in running
+        and not _never_a_title(text)
     ]
+    for size in sorted({size for size, _ in lines}, reverse=True):
+        if size < body * 1.15:
+            break
+        at_size = [index for index, (s, _) in enumerate(lines) if s == size]
+        # three or more lines at one size are a paragraph or a table, not a title
+        if len(at_size) > 2:
+            continue
+        texts = [lines[index][1] for index in at_size]
+        wraps = (
+            len(at_size) == 2
+            and at_size[1] == at_size[0] + 1
+            and (_opens_lower(texts[1]) or (texts[0].isupper() and texts[1].isupper()))
+        )
+        if wraps:
+            texts = [" ".join(texts)]
+        titles = [text.rstrip(" -–—") for text in texts if _is_title(text)]
+        if titles:
+            return titles
+    return []
+
+
+def _doc_lines(doc: pymupdf.Document) -> tuple[list[list[tuple[float, str]]], set[str], float]:
+    """Per-page lines, the running header/footer keys, and the body text size.
+
+    The body size is the median weighted by characters, not by lines: counted per line,
+    footers and drawing labels outnumber the body text and every label looks like a heading.
+    """
+    pages = [_page_lines(page) for page in doc]
+    weighted = sorted((size, len(text)) for lines in pages for size, text in lines)
+    half = sum(weight for _, weight in weighted) / 2
+    body, seen = 0.0, 0
+    for size, weight in weighted:
+        seen += weight
+        if seen >= half:
+            body = size
+            break
+    return pages, _running_keys(pages), body
+
+
+def _sections_heuristic(doc: pymupdf.Document) -> list[Section]:
+    pages, running, body = _doc_lines(doc)
+    out: list[Section] = []
+    for index, lines in enumerate(pages):
+        for title in _page_headings(lines, running, body):
+            # a heading repeated on the next page continues its section, it does not open one
+            if out and _line_key(out[-1].title) == _line_key(title):
+                continue
+            out.append(Section(index, title, 1))
     if not out or out[0].page != 0:
-        out.insert(0, Section(0, per_page[0][1] or "Document", 1))
+        out.insert(0, Section(0, (doc.metadata or {}).get("title") or "Document", 1))
     return out
+
+
+def resolve_file_titles(doc: pymupdf.Document, sections: list[Section]) -> int:
+    """A merged document often carries bookmarks named after the files it was built from
+    (`95587112.pdf`). Each one is replaced with the heading printed on its page, or with the
+    bare file stem when the page has none. Returns how many bookmarks were renamed."""
+    targets = [section for section in sections if _FILE_NAME.match(section.title)]
+    if not targets:
+        return 0
+    pages, running, body = _doc_lines(doc)
+    for section in targets:
+        headings = []
+        if 0 <= section.page < len(pages):
+            headings = _page_headings(pages[section.page], running, body)
+        section.title = (headings[0] if headings else None) or re.sub(
+            r"\.[a-z0-9]{1,4}$", "", section.title, flags=re.IGNORECASE
+        )
+    return len(targets)
 
 
 def section_map(
@@ -220,11 +335,34 @@ def classify(doc: pymupdf.Document) -> tuple[str, bool, bool, int]:
     return kind, has_tables, has_images, text_pages
 
 
+def _mapped_sections(
+    doc: pymupdf.Document, source: Path, toc_json: Path | None
+) -> tuple[list[Section], str, int]:
+    sections, toc_source = section_map(doc, source, toc_json)
+    renamed = resolve_file_titles(doc, sections) if toc_source == "bookmarks" else 0
+    return sections, toc_source, renamed
+
+
+def remap_sections(info: DocInfo, text_copy: Path) -> DocInfo:
+    """Rebuild the section map from a copy that gained a text layer through OCR.
+
+    The map built at intake came from a scan with no text, so it holds one section at most.
+    Identity fields (path, size, slug) stay the original source's: they drive the
+    source-intact check and the output names.
+    """
+    doc = open_doc(text_copy)
+    try:
+        sections, toc_source, renamed = _mapped_sections(doc, info.path, None)
+    finally:
+        doc.close()
+    return replace(info, sections=sections, toc_source=toc_source, renamed_sections=renamed)
+
+
 def inspect(path: Path, toc_json: Path | None = None) -> DocInfo:
     doc = open_doc(path)
     try:
         kind, has_tables, has_images, text_pages = classify(doc)
-        sections, toc_source = section_map(doc, path, toc_json)
+        sections, toc_source, renamed = _mapped_sections(doc, path, toc_json)
         return DocInfo(
             path=path,
             slug=slugify(path.stem),
@@ -236,6 +374,7 @@ def inspect(path: Path, toc_json: Path | None = None) -> DocInfo:
             text_pages=text_pages,
             sections=sections,
             toc_source=toc_source,
+            renamed_sections=renamed,
         )
     finally:
         doc.close()

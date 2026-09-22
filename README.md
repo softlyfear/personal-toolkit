@@ -248,8 +248,8 @@ bash cli/pdf-prep/install.sh
 ```
 
 ```bash
-pdf-prep split                        # compress + cut into parts with a manifest
-pdf-prep compress --target-mb 20      # compress only, verified lossless by default
+pdf-prep split                        # compress + cut into parts with an index for a Claude Project
+pdf-prep compress                     # compress only, every output verified before delivery
 pdf-prep translate --lang russian     # translate into Markdown, DOCX or an overlay PDF
 ```
 

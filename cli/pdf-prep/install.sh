@@ -183,7 +183,7 @@ print_summary() {
   echo "Results:  ${project_dir}/result"
   echo ""
   echo "  pdf-prep split                      compress + cut into parts for a Claude Project"
-  echo "  pdf-prep compress --target-mb 20    compress only"
+  echo "  pdf-prep compress                   compress only"
   echo "  pdf-prep translate --lang russian   translate (Claude CLI by default)"
   echo "  pdf-prep doctor --llm               check everything, provider included"
   case ":${PATH}:" in

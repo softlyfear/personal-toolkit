@@ -1,10 +1,7 @@
-"""Compression: strictly lossless first, raster downsampling only when a limit demands it.
+"""Compression: lossless restructuring, then a gentle raster downsample.
 
-Profiles:
-  lossless   — structural only; rendered pixels, extractable text and interactive content
-               stay byte-identical, and that is verified before the file is accepted.
-  balanced   — lossless always; the lossy pass runs only when a size target is still missed.
-  aggressive — lossy pass on every file.
+The lossless pass always runs and its result is the floor: the lossy output is accepted only
+when it is both smaller and passes the acceptance checks, otherwise the lossless one is kept.
 Any output larger than its input is discarded and the input is kept ("no gain").
 """
 
@@ -275,12 +272,10 @@ def compress_file(
     src: Path,
     dst: Path,
     *,
-    profile: str,
     target_dpi: int,
     jpeg_quality: int,
     verify_dpi: int,
     verify_sample: int,
-    target_bytes: int | None = None,
     work_dir: Path,
 ) -> CompressResult:
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -294,22 +289,17 @@ def compress_file(
 
     accepted = stage
     lossy_applied = False
-    recoded = 0
-    needs_lossy = profile == "aggressive" or (
-        profile == "balanced" and target_bytes is not None and stage.stat().st_size > target_bytes
-    )
-    if needs_lossy:
-        lossy = work_dir / f"{src.stem}.lossy.pdf"
-        try:
-            recoded = lossy_pass(src, lossy, target_dpi, jpeg_quality)
-        except Exception as exc:
-            warn(f"{src.name}: lossy pass skipped ({exc})")
-            recoded = 0
-        if recoded and lossy.is_file() and lossy.stat().st_size < stage.stat().st_size:
-            accepted = lossy
-            lossy_applied = True
-        elif lossy.is_file():
-            lossy.unlink()
+    lossy = work_dir / f"{src.stem}.lossy.pdf"
+    try:
+        recoded = lossy_pass(src, lossy, target_dpi, jpeg_quality)
+    except Exception as exc:
+        warn(f"{src.name}: lossy pass skipped ({exc})")
+        recoded = 0
+    if recoded and lossy.is_file() and lossy.stat().st_size < stage.stat().st_size:
+        accepted = lossy
+        lossy_applied = True
+    elif lossy.is_file():
+        lossy.unlink()
 
     report = verify(
         src,
@@ -338,7 +328,7 @@ def compress_file(
     # src and dst are the same file when a part is recompressed in place and shows no gain.
     if not (dst.exists() and deliverable.samefile(dst)):
         shutil.copyfile(deliverable, dst)
-    for leftover in (stage, work_dir / f"{src.stem}.lossy.pdf"):
+    for leftover in (stage, lossy):
         if leftover.exists() and leftover != dst:
             leftover.unlink()
 

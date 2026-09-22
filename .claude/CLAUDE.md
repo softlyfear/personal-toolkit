@@ -338,8 +338,8 @@ error, and not a half-installed unit that would fail every slot.
 
 ### `cli/pdf-prep/`
 
-The second cli tool: compress / split-for-a-Claude-Project / translate, `task/` in, `result/<slug>/`
-out. Unlike `claude-auto-ping` it is a *packaged* uv project (`package` defaults to true, hatchling,
+The second cli tool: compress / split-for-a-Claude-Project / translate, `task/` in, `result/` out —
+flat, no per-document subfolders; every output name carries the source slug. Unlike `claude-auto-ping` it is a *packaged* uv project (`package` defaults to true, hatchling,
 `src/pdfprep/`, `[project.scripts] pdf-prep`), because the launcher needs a console entry point.
 Points that are easy to break:
 
@@ -352,9 +352,12 @@ Points that are easy to break:
   wheels land instead: 5.7 GB of venv versus 1.3 GB. Don't "clean up" those two lines.
 - `PYMUPDF_MESSAGE=fd:2` is set in `src/pdfprep/__init__.py` before PyMuPDF loads: MuPDF's notices
   otherwise land on stdout, where the report tables are written.
-- Compression is verified, not assumed: a lossless output must pass pixel-identity, text-identity,
-  geometry and feature-count checks, or it is not delivered. A lossy output falls back to the
-  lossless one on failure, and an output that is not smaller is discarded in favour of the source.
+- Compression has one mode: a lossless pass, then rasters above `target_dpi` re-encoded at
+  `jpeg_quality` (200 dpi / q85). It is verified, not assumed: a lossless output must pass
+  pixel-identity, text-identity, geometry and feature-count checks, or it is not delivered. A lossy
+  output falls back to the lossless one on failure, and an output that is not smaller is discarded
+  in favour of the source. `compress` writes `result/<source file name>` unchanged, so it refuses to
+  run when that path is the source itself.
 - OCR inserts words with `insert_text`, not `insert_textbox`: a textbox silently drops a word that
   does not fit its own bounding box, which produced an empty text layer for a whole document.
 - Parts are built with `Pdf.add_pages_from()`, never `pages.extend()`: the latter drops AcroForm
@@ -370,7 +373,22 @@ Points that are easy to break:
 - `split` deletes its **own** previous output for that source before writing
   (`_clear_previous_run`), because a re-run with other limits produces other file names and the
   stale parts would be validated as if they belonged to the new set. The pattern list is deliberately
-  narrow: a translation or a compressed copy in the same result folder is not ours to delete.
+  narrow and slug-scoped: `result/` is shared, so another document's parts, a translation or a
+  compressed copy are not ours to delete.
+- The split index is written for Claude *inside* a claude.ai Project, not for the local disk:
+  `<slug>--manifest.{json,md,txt}` are three renderings of one index for different readers, not
+  copies of each other. No paths, no sizes — a Project has no folders, and sizes only matter before
+  upload. `chapters` are `{title, page}` objects with the *original* page; `continues_in` /
+  `continues_from` link parts whose boundary cuts a section or a table.
+  `claude-project-instructions.md` is the matching Project prompt; change both together.
+- Section titles (`pdfdoc._page_headings`) err towards returning nothing — a wrong title in the
+  index misleads more than a missing one. The body size is the median **weighted by characters**:
+  counted per line, footers and drawing labels dominate and every label looks like a heading. Lines
+  with fewer than 3 letters are dropped **before** grouping by size, or a bullet glyph set at the
+  heading's size hides the heading. Text on a quarter of the pages or more is a running header or
+  logo. Bookmarks named after files (`95587112.pdf`, common in merged manuals) take the heading
+  printed on their page. After OCR the section map is rebuilt (`remap_sections`): the one built at
+  intake came from a scan with no text.
 - `task/`, `result/`, `.work/` and `config.toml` are gitignored (`.gitkeep` files excepted) — the
   user's own documents must never enter a commit.
 
