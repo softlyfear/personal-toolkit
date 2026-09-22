@@ -1,0 +1,46 @@
+[project]
+name = "pdf-prep"
+version = "0.1.0"
+description = "Local PDF toolbox: compress, split for Claude Projects, translate. Drop files in task/, take them from result/"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "pikepdf>=9.4",
+    "pymupdf>=1.24",
+    "pypdf>=5.1",
+    "pillow>=10.4",
+    "numpy>=1.26",
+    "python-docx>=1.1",
+    "easyocr>=1.7.2",
+    "anthropic>=0.40",
+    "openai>=1.55",
+    # Direct dependencies only so [tool.uv.sources] below can pin them; easyocr pulls them anyway
+    "torch>=2.2",
+    "torchvision>=0.17",
+]
+
+[project.scripts]
+pdf-prep = "pdfprep.cli:main"
+
+# easyocr pulls torch; the default PyPI wheel carries the CUDA runtime (~2.5 GB).
+# This index pins the CPU build instead — same OCR, roughly a tenth of the download.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+torchvision = [{ index = "pytorch-cpu" }]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pdfprep"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

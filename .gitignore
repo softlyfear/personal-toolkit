@@ -212,3 +212,11 @@ __marimo__/
 
 # claude-auto-ping rotated logs: *.log above does not match ping.log.1
 *.log.[0-9]
+
+# pdf-prep: the user's own documents and everything produced from them, plus local settings
+cli/pdf-prep/task/*
+!cli/pdf-prep/task/.gitkeep
+cli/pdf-prep/result/*
+!cli/pdf-prep/result/.gitkeep
+cli/pdf-prep/.work/
+cli/pdf-prep/config.toml

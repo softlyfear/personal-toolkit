@@ -336,6 +336,44 @@ so it runs in two passes of the same command: `verify_login()` sends one real me
 anything is downloaded, and a logged-out CLI ends pass 1 with `return 0` and instructions — not an
 error, and not a half-installed unit that would fail every slot.
 
+### `cli/pdf-prep/`
+
+The second cli tool: compress / split-for-a-Claude-Project / translate, `task/` in, `result/<slug>/`
+out. Unlike `claude-auto-ping` it is a *packaged* uv project (`package` defaults to true, hatchling,
+`src/pdfprep/`, `[project.scripts] pdf-prep`), because the launcher needs a console entry point.
+Points that are easy to break:
+
+- `install.sh` runs **from a copy on disk only** — it refuses a `wget`-piped invocation because it
+  resolves the project directory from `BASH_SOURCE[0]`. It is Bash, so it is inside `.claude/lint.sh`.
+  It writes `PDFPREP_HOME` into the generated `~/.local/bin/pdf-prep` launcher; that is what makes
+  `task/`/`result/` resolve from any working directory.
+- `torch`/`torchvision` are listed as **direct** dependencies purely so `[tool.uv.sources]` can pin
+  them to the `pytorch-cpu` index. As transitive deps of `easyocr` the pin is ignored and the CUDA
+  wheels land instead: 5.7 GB of venv versus 1.3 GB. Don't "clean up" those two lines.
+- `PYMUPDF_MESSAGE=fd:2` is set in `src/pdfprep/__init__.py` before PyMuPDF loads: MuPDF's notices
+  otherwise land on stdout, where the report tables are written.
+- Compression is verified, not assumed: a lossless output must pass pixel-identity, text-identity,
+  geometry and feature-count checks, or it is not delivered. A lossy output falls back to the
+  lossless one on failure, and an output that is not smaller is discarded in favour of the source.
+- OCR inserts words with `insert_text`, not `insert_textbox`: a textbox silently drops a word that
+  does not fit its own bounding box, which produced an empty text layer for a whole document.
+- Parts are built with `Pdf.add_pages_from()`, never `pages.extend()`: the latter drops AcroForm
+  fields and named destinations (pikepdf says so via `PageCopyWarning`). The matching outline slice
+  is re-attached per part with `set_toc`, whose levels must be renormalised — a slice of a larger
+  document routinely starts below level 1 or skips a level, and `set_toc` rejects both.
+- `--ocr auto` only fires on a document with *no* text layer. A `Mixed` document whose drawings lack
+  text needs `--ocr always`; that is deliberate, not an oversight — OCR'ing 800 typeset pages to
+  reach 93 drawings is minutes of CPU for nothing.
+- LLM providers live in one file with one rule: Claude (`claude-cli`) is the default and needs no
+  key; every other backend reads its key from an environment variable only. Resolution order for
+  every setting is CLI flag > `PDFPREP_*` env > `config.toml` > built-in default.
+- `split` deletes its **own** previous output for that source before writing
+  (`_clear_previous_run`), because a re-run with other limits produces other file names and the
+  stale parts would be validated as if they belonged to the new set. The pattern list is deliberately
+  narrow: a translation or a compressed copy in the same result folder is not ours to delete.
+- `task/`, `result/`, `.work/` and `config.toml` are gitignored (`.gitkeep` files excepted) — the
+  user's own documents must never enter a commit.
+
 ## web3/ (out of scope for features, still inside the gate)
 
 `web3/cosmos_node_commands.sh` (source-only Cosmos validator helpers) and `web3/geth+beacon.sh` (Sepolia
