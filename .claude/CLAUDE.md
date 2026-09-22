@@ -44,7 +44,10 @@ This overrides the usual "branch first when on the default branch" default: the 
 here, reviews the diff before it lands, and finds extra branches pure overhead. Stated on
 2026-08-23 after a `chore/` branch was created unasked.
 
-Still ask before committing, and never push unless asked.
+**One finished task, one commit, then push.** `git add`/`commit`/`push` are in the `allow` list of
+`.claude/settings.json`, so no prompt stands in the way. Commit when a substantial task is complete
+or when the user says so — never intermediate or fix-up commits in between. Subject: short, clear
+Conventional Commits line. Stated on 2026-09-22.
 
 ### No AI email addresses in commits — ever
 
