@@ -13,7 +13,7 @@ personal-toolkit/
 ├── .claude/testing/    # all tests: unit/ (bats) + Docker scenario suites
 ├── server-scripts/     # VPS hardening, updates, svcctl, xrdp
 ├── dev-tools/          # devsetup, FastAPI Makefile
-├── cli/                # claude-auto-ping
+├── cli/                # claude-auto-ping, pdf-prep
 └── web3/               # Cosmos, Ethereum nodes
 ```
 
@@ -199,6 +199,26 @@ bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/m
 ```
 
 Details — [`cli/claude-auto-ping/README.md`](cli/claude-auto-ping/README.md)
+
+### pdf-prep
+
+Local PDF toolbox: **compress**, **split into upload-ready parts for a Claude Project**, **translate**.
+Drop files into `task/`, run one command, collect the results from `result/`. `uv` + venv · OCR via
+EasyOCR (CPU) · Claude CLI by default for translation, API providers optional.
+
+**Install** — from a clone, nothing else is fetched from this repository:
+
+```bash
+bash cli/pdf-prep/install.sh
+```
+
+```bash
+pdf-prep split                        # compress + cut into parts with a manifest
+pdf-prep compress --target-mb 20      # compress only, verified lossless by default
+pdf-prep translate --lang russian     # translate into Markdown, DOCX or an overlay PDF
+```
+
+Details — [`cli/pdf-prep/README.md`](cli/pdf-prep/README.md)
 
 ---
 

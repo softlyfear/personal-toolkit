@@ -1,0 +1,48 @@
+# Copy to config.toml next to this file. config.toml is gitignored.
+# Resolution order for every value below: CLI flag > PDFPREP_* environment variable
+# > this file > built-in default.
+
+[paths]
+# Defaults are task/ and result/ inside the project directory.
+# task_dir = "/home/me/pdfs-in"
+# result_dir = "/home/me/pdfs-out"
+
+[split]
+max_part_mb = 30
+max_part_pages = 100
+
+[compress]
+# lossless  — pixels, text and interactive content stay identical
+# balanced  — lossless first; raster downsampling only for a file/part that still exceeds a limit
+# aggressive — always downsample rasters to target_dpi at jpeg_quality
+profile = "balanced"
+target_dpi = 150
+jpeg_quality = 80
+# Pages rendered per file when verifying compression. 0 = every page.
+verify_sample_pages = 12
+verify_dpi = 150
+
+[ocr]
+# Applied only to pages with no text layer.
+enabled = true
+languages = ["en", "ru"]
+
+[llm]
+# claude-cli       — the `claude` CLI on your Claude subscription (default, no API key)
+# anthropic-api    — Anthropic API, key from ANTHROPIC_API_KEY
+# openai-compatible — OpenAI or any API-compatible endpoint, key from OPENAI_API_KEY
+provider = "claude-cli"
+model = "sonnet"
+max_tokens = 8000
+timeout_s = 600
+# Characters of source text per translation request.
+chunk_chars = 6000
+
+# [llm.anthropic-api]
+# model = "claude-sonnet-5"
+# api_key_env = "ANTHROPIC_API_KEY"
+
+# [llm.openai-compatible]
+# model = "gpt-4.1"
+# api_key_env = "OPENAI_API_KEY"
+# base_url = "https://api.openai.com/v1"
