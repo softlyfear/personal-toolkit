@@ -63,6 +63,10 @@ Ground all 3 strictly in the actual changed-files list and diff body from Step 1
 
 All 3 options must be valid Conventional Commits, differ meaningfully from each other (vary type choice, scope, or emphasis — not just rephrasing), and apply the **same** AI-involvement treatment (they describe the same underlying change):
 
+Never put an email address in any of the 3 options: no `Co-Authored-By: … <noreply@anthropic.com>`
+and no address for any other model or tool. Name the model in the subject or in an `Assisted-by:`
+trailer instead.
+
 - **`none`** — plain subject only. Example: `feat: add install-dev-tools.sh`
 - **`assisted`** — plain subject, blank line, then a trailer:
 
