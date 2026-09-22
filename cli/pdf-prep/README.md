@@ -33,14 +33,15 @@ use.
 
 ```bash
 pdf-prep split                        # compress, then cut into upload-ready parts
-pdf-prep compress --target-mb 20      # compress only
+pdf-prep compress                     # compress only
 pdf-prep translate --lang russian     # translate (Claude CLI by default)
 pdf-prep ocr                          # add a text layer to scans
 pdf-prep list                         # what is in task/, without touching it
 pdf-prep doctor --llm                 # check environment, paths, fonts and the provider
 ```
 
-Every command reads all PDFs under `task/` (recursively) and writes to `result/<source-slug>/`.
+Every command reads all PDFs under `task/` (recursively) and writes straight into `result/`, flat —
+no per-document subfolders. Every name carries the source slug, so outputs never collide.
 `--scope manual vendor-a` limits a run to matching files or folders. Artifacts of earlier runs
 (`--part_`, `--manifest.`, `--translated`) are never picked up as sources.
 
@@ -52,8 +53,23 @@ Every command reads all PDFs under `task/` (recursively) and writes to `result/<
 pdf-prep split
 ```
 
-Each source gets its own `result/<slug>/` holding `<slug>--part_001_<Section>.pdf`, …, plus
-`<slug>--manifest.json` and a byte-identical `<slug>--manifest.txt`.
+Each source produces `<slug>--part_001_<Section>.pdf`, …, plus an index in three forms, all directly in
+`result/`:
+
+| File | For |
+| --- | --- |
+| `<slug>--manifest.md` | Claude reading it as a table of contents: overview table, then every section with its page |
+| `<slug>--manifest.txt` | the same, without markup |
+| `<slug>--manifest.json` | structured lookup |
+
+Upload whichever suits the Project; one is enough. The index holds only what helps *after* upload —
+sections with their original page, cut boundaries (`continues_in` / `continues_from`), and caveats about
+OCR text or guessed titles. Local-disk fields (paths, sizes) are left out: a Project has no folders, and
+the 30 MB check happens here, in the validation table.
+
+Paste [`claude-project-instructions.md`](claude-project-instructions.md) into the Project's
+instructions: it tells Claude to navigate by the index, cite original page numbers, follow cut
+boundaries, and flag OCR-derived values.
 
 Rules the splitter holds to:
 
@@ -62,7 +78,10 @@ Rules the splitter holds to:
 - parts cover the source exactly once — no gaps, no overlaps;
 - a boundary never cuts a table, a list or a figure away from its caption;
 - a part starts at a section start. Sections come from `toc.json` next to the source, else PDF bookmarks,
-  else font-size heuristics — the manifest records which, and a heuristic run is flagged.
+  else font-size heuristics — the manifest records which, and a heuristic run is flagged. A bookmark named
+  after a file (`95587112.pdf`, common in merged manuals) is replaced with the heading printed on its page.
+  The heuristic ignores text repeated on a quarter of the pages or more — running headers and logos.
+  After OCR the section map is rebuilt from the new text layer.
 
 A re-run replaces its own previous output for that source (parts, manifests, Markdown), because different
 limits produce differently named files and stale parts would otherwise pile up. Output of the other
@@ -84,25 +103,27 @@ pdf-prep split --ocr always     # OCR every page that lacks a text layer, then s
 pdf-prep split --ocr never      # skip OCR entirely
 ```
 
-The document is compressed before it is cut, and a part that still exceeds 30 MB is downsampled on its own.
-Every run ends with a validation table: size, pages, coverage, unique names, files in place, manifest pair,
-source unchanged.
+The document is compressed before it is cut, and a part that still exceeds 30 MB is recompressed on its own.
+Every run ends with a validation table: size, pages, coverage, unique names, files in place, index files
+(all three present and listing every part), source unchanged.
 
 ### 2. Compress only
 
 ```bash
-pdf-prep compress                  # lossless unless config says otherwise
-pdf-prep compress --target-mb 20   # allow the lossy pass if 20 MB is still exceeded
-pdf-prep compress --profile lossless
+pdf-prep compress
 ```
 
-Three profiles:
+The output keeps the source's file name: `task/manual.pdf` becomes `result/manual.pdf`. Two passes run
+on every file:
 
-| Profile              | What it does                                                                                                                                                                                       |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lossless`           | Object/xref streams, stream recompression, image deduplication, orphan removal. Rendered pixels, extractable text and interactive content stay identical — and that is **verified**, not assumed.   |
-| `balanced` (default) | Lossless always; raster downsampling (150 dpi, JPEG q80) only for a file or part that still misses its size target.                                                                                |
-| `aggressive`         | Downsample every raster, then the lossless pass on top.                                                                                                                                            |
+| Pass       | What it does                                                                                                                                                                                     |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `lossless` | Object/xref streams, stream recompression, image deduplication, orphan removal. Rendered pixels, extractable text and interactive content stay identical — and that is **verified**, not assumed. |
+| `lossy`    | Rasters above `target_dpi` (200) are re-encoded as JPEG at `jpeg_quality` (85). Text, vectors, annotations and the outline are untouched.                                                         |
+
+The lossless result is the floor: the lossy output is delivered only when it is smaller *and* passes
+acceptance. Tune `target_dpi` / `jpeg_quality` in `config.toml` if the default trade-off is wrong for your
+documents — lower means smaller and softer.
 
 Acceptance runs on the written file: page count and geometry, character-identical text, pixel identity
 (lossless only, sampled pages at `verify_dpi`), annotation/embedded-file/outline counts, and render
@@ -157,7 +178,7 @@ PDFPREP_LLM_PROVIDER=openai-compatible pdf-prep translate --lang russian
 ## Configuration
 
 `config.toml` sits next to this README (gitignored, created from `config.example.toml` by the installer).
-It covers paths, split limits, compression profile and dpi, OCR languages, and the LLM block. Every key has
+It covers paths, split limits, compression dpi and quality, OCR languages, and the LLM block. Every key has
 an equivalent flag or `PDFPREP_*` variable.
 
 ---
@@ -177,5 +198,5 @@ an equivalent flag or `PDFPREP_*` variable.
   pass, far fewer rewrites of the same pages.
 - Pixel verification samples pages (`verify_sample_pages`, default 12) at `verify_dpi` (default 150) rather
   than rendering every page at 300 dpi. Set `verify_sample_pages = 0` for every page.
-- Deliverables go to `result/<slug>/`, not next to the source in `task/`, so sources stay a clean inbox.
+- Deliverables go to `result/`, not next to the source in `task/`, so sources stay a clean inbox.
   Sources are never modified — the validation table checks their byte size at the end.

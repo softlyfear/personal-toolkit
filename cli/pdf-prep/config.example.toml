@@ -12,12 +12,11 @@ max_part_mb = 30
 max_part_pages = 100
 
 [compress]
-# lossless  — pixels, text and interactive content stay identical
-# balanced  — lossless first; raster downsampling only for a file/part that still exceeds a limit
-# aggressive — always downsample rasters to target_dpi at jpeg_quality
-profile = "balanced"
-target_dpi = 150
-jpeg_quality = 80
+# One mode: lossless restructuring, then rasters above target_dpi are downsampled at
+# jpeg_quality. The lossless result is the floor — a lossy output that is larger, or that
+# fails the acceptance checks, is discarded.
+target_dpi = 200
+jpeg_quality = 85
 # Pages rendered per file when verifying compression. 0 = every page.
 verify_sample_pages = 12
 verify_dpi = 150

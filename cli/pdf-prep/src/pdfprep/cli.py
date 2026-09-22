@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from pdfprep import __version__, compress, ocr, pdfdoc, split, translate
-from pdfprep.config import PROFILES, PROVIDERS, Config, load
+from pdfprep.config import PROVIDERS, Config, load
 from pdfprep.fonts import find_font
 from pdfprep.pdfdoc import MB, DocInfo
 from pdfprep.providers import build
@@ -90,14 +90,25 @@ def cmd_split(args, cfg: Config) -> int:
         )
         if doc_info.toc_source == "heuristic":
             warn(f"{source.name}: sections inferred from font size — check the part boundaries")
+        if doc_info.renamed_sections:
+            info(
+                f"{source.name}: {doc_info.renamed_sections} bookmarks were file names, "
+                "renamed after the heading on their page"
+            )
         try:
             staged, ocr_pages, engine = _maybe_ocr(source, doc_info, cfg, args.ocr)
+            if engine:
+                doc_info = pdfdoc.remap_sections(doc_info, staged)
+                info(
+                    f"{source.name}: {len(doc_info.sections)} sections re-read from the OCR "
+                    f"text layer ({doc_info.toc_source})"
+                )
             result = split.split_source(staged, cfg, doc_info)
             if engine:
                 result.ocr_applied = True
                 result.ocr_engine = engine
                 result.notes.append(f"OCR text layer added to {ocr_pages} pages")
-                split.write_manifest(result, cfg.task_dir)
+                split.write_manifest(result)
         except PdfPrepError as exc:
             error(str(exc))
             failures += 1
@@ -146,24 +157,25 @@ def cmd_split(args, cfg: Config) -> int:
 
 def cmd_compress(args, cfg: Config) -> int:
     sources = _sources(cfg, args.scope)
-    target_bytes = int(args.target_mb * MB) if args.target_mb else None
     failures = 0
     rows: list[list[str]] = []
     for source in sources:
-        result_dir = cfg.result_dir / pdfdoc.slugify(source.stem)
-        result_dir.mkdir(parents=True, exist_ok=True)
-        dst = result_dir / f"{pdfdoc.slugify(source.stem)}--compressed.pdf"
-        step(f"{source.name}: profile {cfg.profile}")
+        cfg.result_dir.mkdir(parents=True, exist_ok=True)
+        dst = cfg.result_dir / source.name
+        # The output keeps the source name, so a result dir pointed at task/ would eat the original.
+        if dst.resolve() == source.resolve():
+            error(f"{source.name}: result dir is the source dir — refusing to overwrite the source")
+            failures += 1
+            continue
+        step(f"{source.name}: compressing at {cfg.target_dpi} dpi / q{cfg.jpeg_quality}")
         try:
             result = compress.compress_file(
                 source,
                 dst,
-                profile=cfg.profile,
                 target_dpi=cfg.target_dpi,
                 jpeg_quality=cfg.jpeg_quality,
                 verify_dpi=cfg.verify_dpi,
                 verify_sample=cfg.verify_sample_pages,
-                target_bytes=target_bytes,
                 work_dir=cfg.work_dir,
             )
         except PdfPrepError as exc:
@@ -194,9 +206,8 @@ def cmd_ocr(args, cfg: Config) -> int:
     failures = 0
     for source in sources:
         slug = pdfdoc.slugify(source.stem)
-        result_dir = cfg.result_dir / slug
-        result_dir.mkdir(parents=True, exist_ok=True)
-        dst = result_dir / f"{slug}--ocr.pdf"
+        cfg.result_dir.mkdir(parents=True, exist_ok=True)
+        dst = cfg.result_dir / f"{slug}--ocr.pdf"
         step(f"{source.name}: OCR ({', '.join(cfg.ocr_languages)})")
         try:
             pages, engine = ocr.add_text_layer(source, dst, cfg.ocr_languages, cfg.work_dir)
@@ -359,7 +370,6 @@ def build_parser() -> argparse.ArgumentParser:
     split_cmd = sub.add_parser(
         "split", parents=[common], help="compress, then cut into upload-ready parts"
     )
-    split_cmd.add_argument("--profile", choices=PROFILES)
     split_cmd.add_argument("--max-part-mb", type=float)
     split_cmd.add_argument("--max-part-pages", type=int)
     split_cmd.add_argument(
@@ -371,10 +381,6 @@ def build_parser() -> argparse.ArgumentParser:
     split_cmd.set_defaults(func=cmd_split)
 
     compress_cmd = sub.add_parser("compress", parents=[common], help="compress only")
-    compress_cmd.add_argument("--profile", choices=PROFILES)
-    compress_cmd.add_argument(
-        "--target-mb", type=float, help="allow the lossy pass if the file still exceeds this"
-    )
     compress_cmd.set_defaults(func=cmd_compress)
 
     ocr_cmd = sub.add_parser("ocr", parents=[common], help="add a text layer to scans")
@@ -419,7 +425,6 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load(
             task_dir=args.task_dir,
             result_dir=args.result_dir,
-            profile=getattr(args, "profile", None),
             max_part_mb=getattr(args, "max_part_mb", None),
             max_part_pages=getattr(args, "max_part_pages", None),
             provider=args.provider,

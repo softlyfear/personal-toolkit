@@ -210,7 +210,7 @@ def translate_source(
 ) -> TranslateResult:
     if output_format not in FORMATS:
         raise PdfPrepError(f"Unknown output format {output_format!r}; expected one of {FORMATS}")
-    result_dir = cfg.result_dir / doc_info.slug
+    result_dir = cfg.result_dir
     result_dir.mkdir(parents=True, exist_ok=True)
     result = TranslateResult(info=doc_info, result_dir=result_dir)
 

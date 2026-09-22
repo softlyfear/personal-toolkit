@@ -8,8 +8,8 @@ Where no such boundary exists the part is flagged in the manifest instead of bei
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
+from itertools import pairwise
 from pathlib import Path
 
 import pikepdf
@@ -28,10 +28,18 @@ class Part:
     first_page: int  # 0-based inclusive
     last_page: int  # 0-based inclusive
     size_bytes: int
-    chapters: list[str]
+    sections: list[Section]
     forced_split: bool = False
     forced_split_reason: str | None = None
     section_split: bool = False
+    # The boundary after this part cuts a section or a protected block in two
+    cut_inside: bool = False
+    continues_from: str | None = None
+    continues_in: str | None = None
+
+    @property
+    def chapters(self) -> list[str]:
+        return [section.title for section in self.sections]
 
 
 @dataclass
@@ -103,14 +111,8 @@ def _largest_fitting(source: Path, start: int, hi: int, limit: int, probe: Path)
     return best
 
 
-def _title_for_slug(title: str) -> str:
-    """A bookmark in a merged document is often a file name: `95587112.pdf` must not
-    end up as `95587112-pdf` in the part's name."""
-    return re.sub(r"\.[a-z0-9]{1,4}$", "", title.strip(), flags=re.IGNORECASE) or title
-
-
 def _unique_slug(title: str, used: set[str]) -> str:
-    slug = base = slugify(_title_for_slug(title))
+    slug = base = slugify(title)
     suffix = 2
     while slug in used:
         slug = f"{base}-{suffix}"
@@ -119,12 +121,15 @@ def _unique_slug(title: str, used: set[str]) -> str:
     return slug
 
 
-def _chapter_titles(sections: list[Section], first: int, last: int) -> list[str]:
-    inside = [s.title for s in sections if first <= s.page <= last]
-    if inside:
-        return inside[:12]
-    before = [s.title for s in sections if s.page <= first]
-    return [before[-1]] if before else ["Untitled"]
+def _part_sections(sections: list[Section], first: int, last: int) -> list[Section]:
+    """Every section opening inside the part; a part that opens mid-section also gets the
+    section it continues, first, with that section's own (earlier) start page."""
+    inside = [s for s in sections if first <= s.page <= last]
+    if inside and inside[0].page == first:
+        return inside
+    before = [s for s in sections if s.page < first]
+    lead = [before[-1]] if before else []
+    return (lead + inside) or [Section(first, "Untitled", 1)]
 
 
 def _plan_parts(
@@ -135,15 +140,16 @@ def _plan_parts(
     max_pages: int,
     limit_bytes: int,
     probe: Path,
-) -> list[tuple[int, int, bool, bool, str | None]]:
-    """-> list of (first, last, section_split, forced_split, forced_reason)."""
-    plan: list[tuple[int, int, bool, bool, str | None]] = []
+) -> list[tuple[int, int, bool, bool, str | None, bool]]:
+    """-> list of (first, last, section_split, forced_split, forced_reason, cut_inside)."""
+    plan: list[tuple[int, int, bool, bool, str | None, bool]] = []
     start = 0
     while start < total:
         hi = min(start + max_pages, total) - 1
         last = _largest_fitting(source, start, hi, limit_bytes, probe)
         section_split = False
         forced = False
+        cut_inside = False
         reason: str | None = None
 
         if last < total - 1:
@@ -163,67 +169,209 @@ def _plan_parts(
                 section_split = snapped is not None
             if snapped is None:
                 forced = True
+                cut_inside = True
                 reason = (
                     "no allowed cut point between the section start and the size/page limit; "
                     "a protected block spans the whole span"
                 )
             else:
                 last = snapped
+                cut_inside = section_split
 
         if last < start:
             last = start
         if last == start and _write_range(source, start, start, probe) > limit_bytes:
             forced = True
             reason = "a single page exceeds the size limit even after compression"
-        plan.append((start, last, section_split, forced, reason))
+        plan.append((start, last, section_split, forced, reason, cut_inside))
         start = last + 1
     return plan
 
 
-def _manifest_payload(result: SplitResult, task_dir: Path) -> dict:
-    source_dir = result.info.path.parent
-    try:
-        relative_source = source_dir.relative_to(task_dir).as_posix()
-    except ValueError:
-        relative_source = source_dir.as_posix()
-    try:
-        relative_out = result.result_dir.relative_to(task_dir.parent).as_posix()
-    except ValueError:
-        relative_out = result.result_dir.as_posix()
+# The index is read by Claude inside a Project, after upload: there are no folders there, and
+# the size of a part matters only before upload. So it carries what helps to find and cite
+# content — sections with their pages, cut boundaries, text-quality caveats — and nothing
+# about the local disk. The console validation table still reports sizes.
+
+INDEX_SUFFIXES = ("json", "md", "txt")
+
+
+def _page(section: Section, branch: str) -> int | None:
+    return None if branch == "B" else section.page + 1
+
+
+def _manifest_payload(result: SplitResult) -> dict:
     return {
         "source_file": result.info.path.name,
-        "source_dir": relative_source or ".",
-        "output_dir": relative_out,
-        "output_redirected": False,
         "total_pages": result.info.pages,
         "toc_source": result.info.toc_source,
-        "branch": result.branch,
         "ocr_applied": result.ocr_applied,
-        "ocr_engine": result.ocr_engine,
         "parts": [
             {
                 "file": part.file,
                 "pages_original": (
                     None if result.branch == "B" else [part.first_page + 1, part.last_page + 1]
                 ),
-                "size_mb": round(part.size_bytes / MB, 2),
-                "chapters": part.chapters,
+                "chapters": [
+                    {"title": s.title, "page": _page(s, result.branch)} for s in part.sections
+                ],
                 "forced_split": part.forced_split,
                 "forced_split_reason": part.forced_split_reason,
                 "section_split": part.section_split,
+                "continues_from": part.continues_from,
+                "continues_in": part.continues_in,
             }
             for part in result.parts
         ],
     }
 
 
-def write_manifest(result: SplitResult, task_dir: Path) -> None:
-    """manifest.txt is a byte-identical copy for tools that will not ingest a .json."""
-    payload = json.dumps(_manifest_payload(result, task_dir), ensure_ascii=False, indent=2)
-    for suffix in ("json", "txt"):
-        (result.result_dir / f"{result.info.slug}--manifest.{suffix}").write_text(
-            payload, encoding="utf-8"
+def _caveats(result: SplitResult) -> list[str]:
+    info = result.info
+    lines: list[str] = []
+    if info.toc_source == "bookmarks":
+        line = "Section titles come from the PDF's bookmarks."
+        if info.renamed_sections:
+            line += (
+                f" {info.renamed_sections} of them were file names and were replaced with the"
+                " heading printed on their page; a bare number or drawing code is a bookmark"
+                " whose page has no readable heading."
+            )
+        lines.append(line)
+    elif info.toc_source == "heuristic":
+        lines.append(
+            "Section titles were inferred from font size: expect some to be missing and a few"
+            " to be figure labels rather than headings."
         )
+    else:
+        lines.append("Section titles come from a supplied toc.json.")
+    if result.ocr_applied:
+        lines.append(
+            f"The text layer was produced by OCR ({result.ocr_engine}): numbers, part codes,"
+            " units and quoted wording may be misrecognised — check the page image before"
+            " relying on them."
+        )
+    return lines
+
+
+def _span(part: Part) -> str:
+    return f"{part.first_page + 1}–{part.last_page + 1}"
+
+
+def _continuation_note(part: Part) -> str | None:
+    if not part.continues_in:
+        return None
+    what = "a table, list or figure" if part.forced_split else "a section"
+    return f"The last page cuts {what} in two; it continues in `{part.continues_in}`."
+
+
+def _index_markdown(result: SplitResult) -> str:
+    info, branch = result.info, result.branch
+    count = len(result.parts)
+    kind = ("PDF part" if branch == "A" else "Markdown file") + ("s" if count != 1 else "")
+    out = [f"# {info.path.name} — index", ""]
+    intro = f"{info.pages} pages, split into {count} {kind} for this Project."
+    if branch == "A":
+        intro += (
+            " All page numbers are those of the original document: page K inside a part is"
+            " original page (the part's first page + K − 1)."
+        )
+    out += [intro, "", *(f"- {line}" for line in _caveats(result)), ""]
+
+    if branch == "A":
+        out += ["| Part | Pages | Opens with | File |", "|---:|---|---|---|"]
+        for number, part in enumerate(result.parts, start=1):
+            out.append(f"| {number} | {_span(part)} | {part.chapters[0]} | `{part.file}` |")
+        out.append("")
+
+    for number, part in enumerate(result.parts, start=1):
+        heading = f"## Part {number}"
+        if branch == "A":
+            heading += f" · pages {_span(part)}"
+        out += [heading, "", f"`{part.file}`", ""]
+        for section in part.sections:
+            indent = "  " * (max(1, section.level) - 1)
+            if branch == "B":
+                out.append(f"{indent}- {section.title}")
+            elif section.page < part.first_page:
+                out.append(f"{indent}- {section.title} — continued from p. {section.page + 1}")
+            else:
+                out.append(f"{indent}- p. {section.page + 1} — {section.title}")
+        if part.continues_from:
+            out += ["", f"> Opens mid-way: the first page continues `{part.continues_from}`."]
+        if note := _continuation_note(part):
+            out += ["", f"> {note}"]
+        out.append("")
+    return "\n".join(out).rstrip() + "\n"
+
+
+def _index_text(result: SplitResult) -> str:
+    """The same index as plain text: no markup, one line per section, easy to grep."""
+    info, branch = result.info, result.branch
+    out = [f"{info.path.name} — index", ""]
+    count = len(result.parts)
+    out.append(f"{info.pages} pages, {count} part{'s' if count != 1 else ''}.")
+    if branch == "A":
+        out.append(
+            "Page numbers are the original document's; page K inside a part ="
+            " the part's first page + K - 1."
+        )
+    out += [*_caveats(result), ""]
+    for number, part in enumerate(result.parts, start=1):
+        span = f"  pages {part.first_page + 1}-{part.last_page + 1}" if branch == "A" else ""
+        out.append(f"PART {number}{span}  {part.file}")
+        for section in part.sections:
+            indent = "  " * max(1, section.level)
+            if branch == "B":
+                out.append(f"{indent}{section.title}")
+            elif section.page < part.first_page:
+                out.append(f"{indent}(continued from p.{section.page + 1}) {section.title}")
+            else:
+                out.append(f"{indent}p.{section.page + 1:<5} {section.title}")
+        if part.continues_from:
+            out.append(f"  <- opens mid-way, continues {part.continues_from}")
+        if part.continues_in:
+            out.append(f"  -> cut at the end, continues in {part.continues_in}")
+        out.append("")
+    return "\n".join(out).rstrip() + "\n"
+
+
+def write_manifest(result: SplitResult) -> None:
+    """Three renderings of one index; which to upload is the operator's call.
+
+    json for structured lookup, md for Claude to read as a table of contents, txt for the
+    same content without markup.
+    """
+    renderings = {
+        "json": json.dumps(_manifest_payload(result), ensure_ascii=False, indent=2) + "\n",
+        "md": _index_markdown(result),
+        "txt": _index_text(result),
+    }
+    for suffix, text in renderings.items():
+        (result.result_dir / f"{result.info.slug}--manifest.{suffix}").write_text(
+            text, encoding="utf-8"
+        )
+
+
+def _check_index(result: SplitResult, names: list[str]) -> tuple[str, str, str]:
+    """All three renderings exist, the json lists exactly the delivered files, and the md
+    and txt mention every one of them."""
+    paths = {s: result.result_dir / f"{result.info.slug}--manifest.{s}" for s in INDEX_SUFFIXES}
+    missing = [s for s, path in paths.items() if not path.is_file()]
+    if missing:
+        return ("index files", "fail", f"missing manifest.{', manifest.'.join(missing)}")
+    try:
+        listed = [p["file"] for p in json.loads(paths["json"].read_text("utf-8"))["parts"]]
+    except (ValueError, KeyError, TypeError) as exc:
+        return ("index files", "fail", f"manifest.json unreadable ({exc})")
+    if listed != names:
+        return ("index files", "fail", "manifest.json parts differ from the delivered files")
+    for suffix in ("md", "txt"):
+        text = paths[suffix].read_text("utf-8")
+        absent = [name for name in names if name not in text]
+        if absent:
+            return ("index files", "fail", f"manifest.{suffix} omits {absent[0]}")
+    return ("index files", "pass", f"json, md, txt list all {len(names)} files")
 
 
 def validate(result: SplitResult, cfg: Config) -> list[tuple[str, str, str]]:
@@ -310,16 +458,7 @@ def validate(result: SplitResult, cfg: Config) -> list[tuple[str, str, str]]:
             f"{len(present)} of {len(names)} in {result.result_dir}",
         )
     )
-    json_path = result.result_dir / f"{result.info.slug}--manifest.json"
-    txt_path = result.result_dir / f"{result.info.slug}--manifest.txt"
-    identical = (
-        json_path.is_file()
-        and txt_path.is_file()
-        and json_path.read_bytes() == txt_path.read_bytes()
-    )
-    checks.append(
-        ("manifest pair", "pass" if identical else "fail", "manifest.txt matches manifest.json")
-    )
+    checks.append(_check_index(result, names))
     checks.append(
         (
             "source intact",
@@ -344,7 +483,7 @@ def _branch_b(doc: pymupdf.Document, result: SplitResult, cfg: Config) -> None:
                 first_page=0,
                 last_page=doc.page_count - 1,
                 size_bytes=len(payload),
-                chapters=_chapter_titles(result.info.sections, 0, doc.page_count - 1),
+                sections=_part_sections(result.info.sections, 0, doc.page_count - 1),
             )
         )
         return
@@ -379,7 +518,7 @@ def _branch_b(doc: pymupdf.Document, result: SplitResult, cfg: Config) -> None:
                 first_page=0,
                 last_page=doc.page_count - 1,
                 size_bytes=len(data),
-                chapters=[title],
+                sections=[Section(0, title, 1)],
             )
         )
 
@@ -388,13 +527,12 @@ def _clear_previous_run(result_dir: Path, slug: str) -> int:
     """A re-run with different limits produces different file names; leaving the old ones
     behind would put stale parts next to the new set and skew the validation counts.
 
-    Only what this command writes is removed — a translation or a compressed copy sitting
-    in the same result folder belongs to another command and stays.
+    Only what this command writes for this slug is removed — result/ is flat and shared, so a
+    translation, a compressed copy, or another document's parts belong to someone else and stay.
     """
     patterns = (
         f"{slug}--part_*.pdf",
-        f"{slug}--manifest.json",
-        f"{slug}--manifest.txt",
+        *(f"{slug}--manifest.{suffix}" for suffix in INDEX_SUFFIXES),
         f"{slug}--document.md",
         f"{slug}--[0-9][0-9]_*.md",
     )
@@ -408,7 +546,7 @@ def _clear_previous_run(result_dir: Path, slug: str) -> int:
 
 
 def split_source(source: Path, cfg: Config, doc_info: DocInfo) -> SplitResult:
-    result_dir = cfg.result_dir / doc_info.slug
+    result_dir = cfg.result_dir
     result_dir.mkdir(parents=True, exist_ok=True)
     result = SplitResult(info=doc_info, branch="A", result_dir=result_dir)
     result.replaced = _clear_previous_run(result_dir, doc_info.slug)
@@ -421,7 +559,7 @@ def split_source(source: Path, cfg: Config, doc_info: DocInfo) -> SplitResult:
             _branch_b(doc, result, cfg)
         finally:
             doc.close()
-        write_manifest(result, cfg.task_dir)
+        write_manifest(result)
         return result
 
     cfg.work_dir.mkdir(parents=True, exist_ok=True)
@@ -430,12 +568,10 @@ def split_source(source: Path, cfg: Config, doc_info: DocInfo) -> SplitResult:
     compressed = compress.compress_file(
         source,
         staged,
-        profile=cfg.profile,
         target_dpi=cfg.target_dpi,
         jpeg_quality=cfg.jpeg_quality,
         verify_dpi=cfg.verify_dpi,
         verify_sample=cfg.verify_sample_pages,
-        target_bytes=limit_bytes,
         work_dir=cfg.work_dir,
     )
     result.compressed_from = compressed.size_in
@@ -462,17 +598,20 @@ def split_source(source: Path, cfg: Config, doc_info: DocInfo) -> SplitResult:
         probe.unlink()
 
     used: set[str] = set()
-    for index, (first, last, section_split, forced, reason) in enumerate(plan, start=1):
-        chapters = _chapter_titles(doc_info.sections, first, last)
-        name = f"{doc_info.slug}--part_{index:03d}_{_unique_slug(chapters[0], used)}.pdf"
+    for index, (first, last, section_split, forced, reason, cut_inside) in enumerate(plan, start=1):
+        sections = _part_sections(doc_info.sections, first, last)
+        # named after the first section that opens here, not the one it merely continues
+        opener = next((s for s in sections if s.page >= first), sections[0])
+        name = f"{doc_info.slug}--part_{index:03d}_{_unique_slug(opener.title, used)}.pdf"
         path = result_dir / name
         size = _write_range(staged, first, last, path, doc_info.sections)
 
         if size > limit_bytes and not forced:
+            # The staged source is already downsampled, so this pass only restructures the part;
+            # it still helps, because a slice drops resources the whole document shared.
             shrunk = compress.compress_file(
                 path,
                 path,
-                profile="aggressive",
                 target_dpi=cfg.target_dpi,
                 jpeg_quality=cfg.jpeg_quality,
                 verify_dpi=cfg.verify_dpi,
@@ -482,9 +621,9 @@ def split_source(source: Path, cfg: Config, doc_info: DocInfo) -> SplitResult:
             size = shrunk.size_out
             if size > limit_bytes:
                 forced = True
-                reason = f"part still {size / MB:.2f} MB after downsampling to {cfg.target_dpi} dpi"
+                reason = f"part still {size / MB:.2f} MB after recompression"
             else:
-                result.notes.append(f"{name}: downsampled to fit {cfg.max_part_mb} MB")
+                result.notes.append(f"{name}: recompressed to fit {cfg.max_part_mb} MB")
 
         result.parts.append(
             Part(
@@ -492,14 +631,20 @@ def split_source(source: Path, cfg: Config, doc_info: DocInfo) -> SplitResult:
                 first_page=first,
                 last_page=last,
                 size_bytes=size,
-                chapters=chapters,
+                sections=sections,
                 forced_split=forced,
                 forced_split_reason=reason,
                 section_split=section_split,
+                cut_inside=cut_inside,
             )
         )
 
+    for part, following in pairwise(result.parts):
+        if part.cut_inside:
+            part.continues_in = following.file
+            following.continues_from = part.file
+
     if staged.exists():
         staged.unlink()
-    write_manifest(result, cfg.task_dir)
+    write_manifest(result)
     return result
