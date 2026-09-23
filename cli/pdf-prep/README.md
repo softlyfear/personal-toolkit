@@ -92,7 +92,8 @@ Rules the splitter holds to:
 - parts cover the source exactly once — no gaps, no overlaps;
 - a boundary never cuts a table, a list or a figure away from its caption;
 - a part starts at a section start. Sections come from `toc.json` next to the source, else PDF bookmarks,
-  else the printed table of contents, else font-size heuristics — the manifest records which, and a
+  else the printed table of contents (with page numbers, or a numbered list of headings without
+  them), else font-size heuristics — the manifest records which, and a
   heuristic run is flagged. A printed contents entry is kept only if its title is found on the page it
   points to, and contents that stop before the second half of the document (one volume of a merged
   manual) are not used. A bookmark named after a file (`95587112.pdf`, common in merged manuals) is

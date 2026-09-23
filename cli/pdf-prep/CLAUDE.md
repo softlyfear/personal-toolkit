@@ -75,7 +75,12 @@ Points that are easy to break:
   only need to be larger than the body, not 15% larger, and several may share a page — but only
   those on the longest ascending chain of numbers across the document count: procedure steps
   restart at "1." and diagram callouts come in any order. A numbered line is never the wrapped tail
-  of the line above it. Bookmarks named after files (`95587112.pdf`, common in merged manuals) take the heading
+  of the line above it. A contents page that lists numbered entries but no page numbers is used too:
+  each entry must open a line of its own on a later page, in order (a mention inside a paragraph
+  does not count), under the same 60% / second-half bars. The pages before the first section are
+  named after the cover's largest heading, measured against the cover's own body size — measured
+  across several pages, a company name or logo wins. Letter-spaced text ("C O N T E N T S") is
+  rejoined from glyph positions, the only place its word breaks survive. Bookmarks named after files (`95587112.pdf`, common in merged manuals) take the heading
   printed on their page. After OCR the section map is rebuilt (`remap_sections`): the one built at
   intake came from a scan with no text.
 - `task/`, `result/`, `.work/` and `config.toml` are gitignored (`.gitkeep` files excepted) — the

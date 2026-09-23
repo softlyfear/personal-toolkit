@@ -133,3 +133,56 @@ def test_a_numbered_line_is_never_the_wrapped_tail_of_the_one_above() -> None:
     assert pdfdoc._page_headings([(16.0, "HIGH VOLTAGE"), (16.0, "GENERATOR")], set(), 11.0) == [
         "HIGH VOLTAGE GENERATOR"
     ]
+
+
+OUTLINE = [
+    ("1 - INTRODUCTION", 2),
+    ("2 - SAFETY PRECAUTIONS", 2),
+    ("2.1 - Safety Labels Used", 3),
+    ("3 - INSTALLATION and OPERATION", 4),
+    ("3.1 - Assembly Procedure", 6),
+    ("4 - MAINTENANCE", 9),
+    ("4.1 - Cleaning", 11),
+]
+
+
+def test_an_outline_without_page_numbers_is_found_line_by_line(make_pdf) -> None:
+    # a contents page that lists the numbered headings but no pages: each entry counts where
+    # it opens a line of its own, not where a paragraph merely mentions it
+    def fill(page: pymupdf.Page, number: int) -> None:
+        if number == 0:
+            page.insert_text((72, 100), "TRAY CARRIER", fontsize=24)
+            page.insert_text(
+                (72, 700), "Model MSTS-M, revision 3, issued for installers", fontsize=BODY
+            )
+            return
+        if number == 1:
+            for row, (title, _) in enumerate(OUTLINE):
+                page.insert_text((72, 100 + row * 18), title, fontsize=BODY)
+            return
+        y = 100
+        for title, target in OUTLINE:
+            if target == number:
+                page.insert_text((72, y), title.replace(" - ", "- "), fontsize=BODY)
+                y += 20
+        if number == 5:
+            # between "3 -" on page 4 and the real "3.1 -" on page 6
+            page.insert_text((72, y), "See 3.1 - Assembly Procedure before use.", fontsize=BODY)
+        body_text(page, top=y + 30)
+
+    info = pdfdoc.inspect(make_pdf("listing", 12, fill))
+
+    assert info.toc_source == "contents"
+    assert [(s.page, s.level, s.title) for s in info.sections] == [
+        (0, 1, "TRAY CARRIER"),
+        *((target, 2 if "." in title.split()[0] else 1, title) for title, target in OUTLINE),
+    ]
+
+
+def test_letter_spaced_text_is_read_as_words(make_pdf) -> None:
+    def fill(page: pymupdf.Page, _number: int) -> None:
+        page.insert_text((72, 100), "O P E R A T I N G     M A N U A L", fontsize=18)
+
+    doc = pymupdf.open(make_pdf("spaced", 1, fill))
+
+    assert pdfdoc._page_lines(doc[0]) == [(18.0, "OPERATING MANUAL")]
