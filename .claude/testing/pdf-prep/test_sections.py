@@ -186,3 +186,45 @@ def test_letter_spaced_text_is_read_as_words(make_pdf) -> None:
     doc = pymupdf.open(make_pdf("spaced", 1, fill))
 
     assert pdfdoc._page_lines(doc[0]) == [(18.0, "OPERATING MANUAL")]
+
+
+WRAPPED = [
+    ("1", ["INSTALLATION, USE AND SAFETY"], "INFORMATION", 3),
+    ("3.1", ["PRELIMINARY LAYOUT INSPECTION"], "AND POSITIONING", 5),
+    ("3.2", ["ASSEMBLY PROCEDURE OF THE PANEL-"], "SHAPE VERSION", 7),
+    ("4.3.2", ["FREE ACCESS TO LOCAL", "PROGRAMMING PHASE WITHOUT"], "PASSWORD", 9),
+    ("5", [], "Maintenance", 11),
+    ("5.1", ["Replacing the drive belt"], "of the upper conveyor", 12),
+]
+
+
+def test_contents_entries_wrapped_over_several_lines_are_rejoined(make_pdf) -> None:
+    def fill(page: pymupdf.Page, number: int) -> None:
+        if number == 1:
+            # a page number and a running header right above an unnumbered entry
+            lines = ["2", "Operator manual", f"Operator status icon {'.' * 30} 2"]
+            for code, head, tail, printed in WRAPPED:
+                lines += [code, *head, f"{tail} {'.' * 30} {printed}"]
+            for row, text in enumerate(lines):
+                page.insert_text((72, 60 + row * 14), text, fontsize=BODY)
+            return
+        body_text(page)
+        if number == 2 - 1 + OFFSET:
+            page.insert_text((72, 90), "Operator status icon", fontsize=BODY)
+        for code, head, tail, printed in WRAPPED:
+            if printed - 1 + OFFSET == number:
+                title = "".join(p if p.endswith("-") else f"{p} " for p in head) + tail
+                page.insert_text((72, 110), f"{code} {title}", fontsize=BODY)
+
+    info = pdfdoc.inspect(make_pdf("wrapped", 16, fill))
+
+    assert info.toc_source == "contents"
+    assert [s.title for s in info.sections[1:]] == [
+        "Operator status icon",
+        "1 INSTALLATION, USE AND SAFETY INFORMATION",
+        "3.1 PRELIMINARY LAYOUT INSPECTION AND POSITIONING",
+        "3.2 ASSEMBLY PROCEDURE OF THE PANEL-SHAPE VERSION",
+        "4.3.2 FREE ACCESS TO LOCAL PROGRAMMING PHASE WITHOUT PASSWORD",
+        "5 Maintenance",
+        "5.1 Replacing the drive belt of the upper conveyor",
+    ]
