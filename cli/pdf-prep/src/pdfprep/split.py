@@ -8,6 +8,7 @@ Where no such boundary exists the part is flagged in the manifest instead of bei
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass, field
 from itertools import pairwise
 from pathlib import Path
@@ -19,7 +20,7 @@ from pdfprep import compress
 from pdfprep.config import Config
 from pdfprep.extract import blocks_to_markdown, extract_blocks
 from pdfprep.pdfdoc import MB, DocInfo, Section, continuation_pages, open_doc, slugify
-from pdfprep.ui import warn
+from pdfprep.ui import PdfPrepError, warn
 
 
 @dataclass
@@ -582,18 +583,26 @@ def split_source(source: Path, cfg: Config, doc_info: DocInfo) -> SplitResult:
     cfg.work_dir.mkdir(parents=True, exist_ok=True)
     limit_bytes = int(cfg.max_part_mb * MB)
     staged = cfg.work_dir / f"{doc_info.slug}--staged.pdf"
-    compressed = compress.compress_file(
-        source,
-        staged,
-        target_dpi=cfg.target_dpi,
-        jpeg_quality=cfg.jpeg_quality,
-        verify_dpi=cfg.verify_dpi,
-        verify_sample=cfg.verify_sample_pages,
-        work_dir=cfg.work_dir,
-    )
-    result.compressed_from = compressed.size_in
-    result.compressed_to = compressed.size_out
-    if compressed.lossy_applied:
+    try:
+        compressed = compress.compress_file(
+            source,
+            staged,
+            target_dpi=cfg.target_dpi,
+            jpeg_quality=cfg.jpeg_quality,
+            verify_dpi=cfg.verify_dpi,
+            verify_sample=cfg.verify_sample_pages,
+            work_dir=cfg.work_dir,
+        )
+    # compression is an optimisation: a rejected one must not cost the whole split
+    except PdfPrepError as exc:
+        warn(f"{exc} — splitting the uncompressed source")
+        shutil.copyfile(source, staged)
+        compressed = None
+    result.compressed_from = source.stat().st_size
+    result.compressed_to = staged.stat().st_size
+    if compressed is None:
+        result.notes.append("compression was rejected by its checks; parts carry the source as is")
+    elif compressed.lossy_applied:
         result.notes.append(
             f"lossy pass applied before splitting: {compressed.images_recoded} images "
             f"downsampled to {cfg.target_dpi} dpi / JPEG q{cfg.jpeg_quality}"
@@ -626,16 +635,18 @@ def split_source(source: Path, cfg: Config, doc_info: DocInfo) -> SplitResult:
         if size > limit_bytes and not forced:
             # The staged source is already downsampled, so this pass only restructures the part;
             # it still helps, because a slice drops resources the whole document shared.
-            shrunk = compress.compress_file(
-                path,
-                path,
-                target_dpi=cfg.target_dpi,
-                jpeg_quality=cfg.jpeg_quality,
-                verify_dpi=cfg.verify_dpi,
-                verify_sample=cfg.verify_sample_pages,
-                work_dir=cfg.work_dir,
-            )
-            size = shrunk.size_out
+            try:
+                size = compress.compress_file(
+                    path,
+                    path,
+                    target_dpi=cfg.target_dpi,
+                    jpeg_quality=cfg.jpeg_quality,
+                    verify_dpi=cfg.verify_dpi,
+                    verify_sample=cfg.verify_sample_pages,
+                    work_dir=cfg.work_dir,
+                ).size_out
+            except PdfPrepError as exc:
+                warn(str(exc))
             if size > limit_bytes:
                 forced = True
                 reason = f"part still {size / MB:.2f} MB after recompression"
