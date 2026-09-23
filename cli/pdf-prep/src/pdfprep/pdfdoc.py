@@ -204,7 +204,7 @@ def _is_letter_spaced(text: str) -> bool:
 
 
 def _unspaced(page: pymupdf.Page, bbox: tuple[float, float, float, float]) -> str:
-    """ "O P E R A T I N G M A N U A L" as "OPERATING MANUAL".
+    """Rejoin letter-spaced text: "O P E R A T I N G M A N U A L" reads "OPERATING MANUAL".
 
     The extracted text has one space between letters and between words alike, so the word
     breaks come from the glyph positions: the gap between words is several letter gaps wide.
@@ -298,10 +298,12 @@ _NUMBERED_HEADING = re.compile(r"^(?P<number>\d{1,2}(?:\.\d{1,2}){0,3}\.?)\s*[-â
 # more numbered lines than this on one page are a list, a diagram or a contents page
 _NUMBERED_PER_PAGE = 4
 _NUMBERED_MIN_CHAIN = 3
+_WORD = re.compile(r"^[^\W\d_]+(?:-[^\W\d_]+)*$")
+_LONG_WORD = re.compile(r"[^\W\d_]{3,}")
 
 
 def _number_depth(number: str) -> int:
-    """ "1.0" is a chapter, "1.1" a level below it."""
+    """Outline level of a section number: "1.0" is a chapter, "1.1" a level below it."""
     return max(1, len([part for part in number.split(".") if part.strip("0")]))
 
 
@@ -337,13 +339,10 @@ def _numbered_candidates(
     return found if len(found) <= _NUMBERED_PER_PAGE else []
 
 
-_WORD = re.compile(r"^[^\W\d_]+(?:-[^\W\d_]+)*$")
-_WORD_3 = re.compile(r"[^\W\d_]{3,}")
-
-
 def _reads_as_words(title: str) -> bool:
-    """ "2.1 Maintenance of drives", not a wiring callout like "5 WHBK =COU+010-P4" or "24 V DC":
-    two real words, or one word of four letters or more that is not an all-caps code."""
+    """Whether a numbered line is a title ("2.1 Maintenance of drives") rather than a wiring
+    callout ("5 WHBK =COU+010-P4", "24 V DC"): two real words, or one word of four letters or
+    more that is not an all-caps code."""
     words = [
         token
         for token in (raw.strip(".,:;()") for raw in title.split()[1:])
@@ -451,6 +450,16 @@ def _page_headings(
     return []
 
 
+def _body_size(pages: list[list[tuple[float, str]]]) -> float:
+    weighted = sorted((size, len(text)) for lines in pages for size, text in lines)
+    half, seen = sum(weight for _, weight in weighted) / 2, 0
+    for size, weight in weighted:
+        seen += weight
+        if seen >= half:
+            return size
+    return 0.0
+
+
 def _doc_lines(doc: pymupdf.Document) -> tuple[list[list[tuple[float, str]]], set[str], float]:
     """Per-page lines, the running header/footer keys, and the body text size.
 
@@ -458,15 +467,7 @@ def _doc_lines(doc: pymupdf.Document) -> tuple[list[list[tuple[float, str]]], se
     footers and drawing labels outnumber the body text and every label looks like a heading.
     """
     pages = [_page_lines(page) for page in doc]
-    weighted = sorted((size, len(text)) for lines in pages for size, text in lines)
-    half = sum(weight for _, weight in weighted) / 2
-    body, seen = 0.0, 0
-    for size, weight in weighted:
-        seen += weight
-        if seen >= half:
-            body = size
-            break
-    return pages, _running_keys(pages), body
+    return pages, _running_keys(pages), _body_size(pages)
 
 
 def _sections_heuristic(doc: pymupdf.Document) -> list[Section]:
@@ -619,15 +620,8 @@ def _with_front_matter(doc: pymupdf.Document, sections: list[Section]) -> list[S
     # the first few pages are enough to tell a running footer from the cover's title
     opening = [_page_lines(page) for page in doc.pages(0, min(doc.page_count, 8))]
     running = _running_keys(opening) if len(opening) >= 3 else set()
-    lines = opening[0]
-    weighted = sorted((size, len(text)) for size, text in lines)
-    half, seen, body = sum(weight for _, weight in weighted) / 2, 0, 0.0
-    for size, weight in weighted:
-        seen += weight
-        if seen >= half:
-            body = size
-            break
-    headings = _page_headings(lines, running, body)
+    # the cover's own body size: measured across several pages, a company name or logo wins
+    headings = _page_headings(opening[0], running, _body_size(opening[:1]))
     title = (headings[0] if headings else None) or (doc.metadata or {}).get("title")
     return [Section(0, title or "Front matter", 1), *sections]
 
@@ -647,7 +641,7 @@ def _sections_from_listing(doc: pymupdf.Document) -> list[Section] | None:
             # one word is enough here ("1 - INTRODUCTION"): five ascending numbers on one page,
             # each found again as a line of its own, already rule out stray labels
             if _NUMBERED_HEADING.match(text)
-            and _WORD_3.search(text.split(maxsplit=1)[-1])
+            and _LONG_WORD.search(text.split(maxsplit=1)[-1])
             and not _LEADER.search(text)
         ]
         chain = _longest_ascending([_number_key(text) for text in found])
