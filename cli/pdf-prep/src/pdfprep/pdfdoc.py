@@ -198,6 +198,37 @@ def _sections_from_bookmarks(doc: pymupdf.Document) -> list[Section] | None:
     return out or None
 
 
+def _is_letter_spaced(text: str) -> bool:
+    tokens = text.split()
+    return len(tokens) >= 4 and all(len(token) == 1 for token in tokens)
+
+
+def _unspaced(page: pymupdf.Page, bbox: tuple[float, float, float, float]) -> str:
+    """ "O P E R A T I N G M A N U A L" as "OPERATING MANUAL".
+
+    The extracted text has one space between letters and between words alike, so the word
+    breaks come from the glyph positions: the gap between words is several letter gaps wide.
+    """
+    chars = [
+        char
+        for block in page.get_text("rawdict", clip=pymupdf.Rect(bbox)).get("blocks", [])
+        for line in block.get("lines", [])
+        for span in line.get("spans", [])
+        for char in span.get("chars", [])
+        if char["c"].strip()
+    ]
+    if len(chars) < 2:
+        return ""
+    gaps = [right["bbox"][0] - left["bbox"][2] for left, right in pairwise(chars)]
+    typical = sorted(gaps)[len(gaps) // 2]
+    words = [chars[0]["c"]]
+    for gap, char in zip(gaps, chars[1:], strict=True):
+        if gap > 2 * max(typical, 0.5):
+            words.append("")
+        words[-1] += char["c"]
+    return " ".join(words)
+
+
 def _page_lines(page: pymupdf.Page) -> list[tuple[float, str]]:
     """Lines in reading order, each with its largest span size rounded to 0.5 pt.
 
@@ -209,6 +240,8 @@ def _page_lines(page: pymupdf.Page) -> list[tuple[float, str]]:
         for line in block.get("lines", []):
             spans = line.get("spans", [])
             text = " ".join("".join(span.get("text", "") for span in spans).split())
+            if _is_letter_spaced(text):
+                text = _unspaced(page, line["bbox"]) or text
             if text:
                 size = max((span.get("size", 0.0) for span in spans), default=0.0)
                 lines.append((round(size * 2) / 2, text))
@@ -261,7 +294,7 @@ def _opens_lower(text: str) -> bool:
 
 
 # "2.1 Title": at most two digits a level, so a year or a quantity never passes for a number
-_NUMBERED_HEADING = re.compile(r"^(?P<number>\d{1,2}(?:\.\d{1,2}){0,3}\.?)\s+[^\W\d_]")
+_NUMBERED_HEADING = re.compile(r"^(?P<number>\d{1,2}(?:\.\d{1,2}){0,3}\.?)\s*[-–—)]?\s+[^\W\d_]")
 # more numbered lines than this on one page are a list, a diagram or a contents page
 _NUMBERED_PER_PAGE = 4
 _NUMBERED_MIN_CHAIN = 3
@@ -305,6 +338,7 @@ def _numbered_candidates(
 
 
 _WORD = re.compile(r"^[^\W\d_]+(?:-[^\W\d_]+)*$")
+_WORD_3 = re.compile(r"[^\W\d_]{3,}")
 
 
 def _reads_as_words(title: str) -> bool:
@@ -323,23 +357,10 @@ def _number_key(title: str) -> tuple[int, ...]:
     return tuple(int(part) for part in match["number"].rstrip(".").split(".")) if match else ()
 
 
-def _numbered_outline(
-    pages: list[list[tuple[float, str]]], running: set[str], body: float
-) -> dict[int, list[str]]:
-    """Numbered headings that form one ascending outline across the document, per page.
-
-    The longest strictly increasing chain of numbers wins: procedure steps restart at "1."
-    and diagram callouts come in any order, so neither survives next to a real outline.
-    """
-    found = [
-        (index, title)
-        for index, lines in enumerate(pages)
-        for title in _numbered_candidates(lines, running, body)
-    ]
-    keys = [_number_key(title) for _, title in found]
-    # patience sorting: tails[k] is the index in `found` ending the best chain of length k+1
+def _longest_ascending(keys: list[tuple[int, ...]]) -> list[int]:
+    """Positions of the longest strictly increasing run of keys, in order (patience sorting)."""
     tails: list[int] = []
-    previous = [-1] * len(found)
+    previous = [-1] * len(keys)
     for position, key in enumerate(keys):
         low, high = 0, len(tails)
         while low < high:
@@ -353,14 +374,34 @@ def _numbered_outline(
             tails.append(position)
         else:
             tails[low] = position
-    if len(tails) < _NUMBERED_MIN_CHAIN:
+    chain: list[int] = []
+    position = tails[-1] if tails else -1
+    while position >= 0:
+        chain.append(position)
+        position = previous[position]
+    return chain[::-1]
+
+
+def _numbered_outline(
+    pages: list[list[tuple[float, str]]], running: set[str], body: float
+) -> dict[int, list[str]]:
+    """Numbered headings that form one ascending outline across the document, per page.
+
+    The longest strictly increasing chain of numbers wins: procedure steps restart at "1."
+    and diagram callouts come in any order, so neither survives next to a real outline.
+    """
+    found = [
+        (index, title)
+        for index, lines in enumerate(pages)
+        for title in _numbered_candidates(lines, running, body)
+    ]
+    chain = _longest_ascending([_number_key(title) for _, title in found])
+    if len(chain) < _NUMBERED_MIN_CHAIN:
         return {}
     outline: dict[int, list[str]] = {}
-    position = tails[-1]
-    while position >= 0:
+    for position in chain:
         index, title = found[position]
-        outline.setdefault(index, []).insert(0, title)
-        position = previous[position]
+        outline.setdefault(index, []).append(title)
     return outline
 
 
@@ -533,9 +574,64 @@ def _sections_from_contents(doc: pymupdf.Document) -> list[Section] | None:
             level = numbered_level + 1 if numbered_level else 1
         out.append(Section(page - 1 + offset, f"{number} {title}".strip(), level))
     out.sort(key=lambda section: section.page)
-    if out[0].page != 0:
-        out.insert(0, Section(0, (doc.metadata or {}).get("title") or "Front matter", 1))
-    return out
+    return _with_front_matter(doc, out)
+
+
+def _with_front_matter(doc: pymupdf.Document, sections: list[Section]) -> list[Section]:
+    """Name the pages before the first section after the largest heading on the first page."""
+    if sections and sections[0].page == 0:
+        return sections
+    # the first few pages are enough to tell a running footer from the cover's title
+    opening = [_page_lines(page) for page in doc.pages(0, min(doc.page_count, 8))]
+    running = _running_keys(opening) if len(opening) >= 3 else set()
+    lines = opening[0]
+    weighted = sorted((size, len(text)) for size, text in lines)
+    half, seen, body = sum(weight for _, weight in weighted) / 2, 0, 0.0
+    for size, weight in weighted:
+        seen += weight
+        if seen >= half:
+            body = size
+            break
+    headings = _page_headings(lines, running, body)
+    title = (headings[0] if headings else None) or (doc.metadata or {}).get("title")
+    return [Section(0, title or "Front matter", 1), *sections]
+
+
+def _sections_from_listing(doc: pymupdf.Document) -> list[Section] | None:
+    """A printed outline without page numbers ("2.1 - Safety Labels Used", no leader).
+
+    Each entry is looked up as a line of its own on the pages after the list, in order, so
+    a mention inside a paragraph never counts. The same bars as the printed contents hold:
+    60% of the entries found, and the last one in the second half of the document.
+    """
+    best_page, entries = -1, []
+    for index in range(min(doc.page_count, 20)):
+        found = [
+            text
+            for _, text in _page_lines(doc[index])
+            # one word is enough here ("1 - INTRODUCTION"): five ascending numbers on one page,
+            # each found again as a line of its own, already rule out stray labels
+            if _NUMBERED_HEADING.match(text)
+            and _WORD_3.search(text.split(maxsplit=1)[-1])
+            and not _LEADER.search(text)
+        ]
+        chain = _longest_ascending([_number_key(text) for text in found])
+        if len(chain) >= 5 and len(chain) >= 0.8 * len(found) and len(chain) > len(entries):
+            best_page, entries = index, [found[position] for position in chain]
+    if best_page < 0:
+        return None
+    page_keys = [{_line_key(text) for _, text in _page_lines(page)} for page in doc]
+    out: list[Section] = []
+    cursor = best_page + 1
+    for title in entries:
+        key = _line_key(title)
+        hit = next((i for i in range(cursor, doc.page_count) if key in page_keys[i]), None)
+        if hit is not None:
+            out.append(Section(hit, title, _heading_level(title)))
+            cursor = hit
+    if len(out) < 0.6 * len(entries) or out[-1].page < doc.page_count // 2:
+        return None
+    return _with_front_matter(doc, out)
 
 
 def section_map(
@@ -548,7 +644,7 @@ def section_map(
     sections = _sections_from_bookmarks(doc)
     if sections:
         return sections, "bookmarks"
-    sections = _sections_from_contents(doc)
+    sections = _sections_from_contents(doc) or _sections_from_listing(doc)
     if sections:
         return sections, "contents"
     return _sections_heuristic(doc), "heuristic"
