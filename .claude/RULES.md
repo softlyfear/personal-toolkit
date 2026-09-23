@@ -110,7 +110,7 @@ What is kept from the original structure rule:
 
 The root contains the scripts that are actually delivered to a target machine, plus
 documentation and the tool dotfiles that must live there (`.shellcheckrc`, `.editorconfig`,
-`.gitattributes`, `.mcp.json`, `.github/workflows/`). Development and test tooling goes under `.claude/` — the quality gate is
+`.gitattributes`, `.github/workflows/`). Development and test tooling goes under `.claude/` — the quality gate is
 `.claude/lint.sh`, the tests are in `.claude/testing/`. Do not add a `scripts/`, `test/`, or
 similar tooling directory to the root.
 
