@@ -33,5 +33,19 @@
   },
   "enabledMcpjsonServers": [
     "context7"
-  ]
+  ],
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard.sh",
+            "timeout": 600
+          }
+        ]
+      }
+    ]
+  }
 }

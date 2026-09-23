@@ -219,4 +219,6 @@ cli/pdf-prep/task/*
 cli/pdf-prep/result/*
 !cli/pdf-prep/result/.gitkeep
 cli/pdf-prep/.work/
+# test venv of .claude/lint.sh, kept apart from the launcher's GPU .venv
+cli/pdf-prep/.venv-test/
 cli/pdf-prep/config.toml

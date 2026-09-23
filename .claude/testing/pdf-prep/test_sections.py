@@ -1,0 +1,89 @@
+"""Where split takes its section titles from: printed contents first, then font sizes."""
+
+from __future__ import annotations
+
+import pymupdf
+from pdfprep import pdfdoc
+
+from conftest import BODY, body_text
+
+FOOTER = "Acme Detection Systems, Inc. - Proprietary"
+
+
+def test_footer_merged_with_its_page_number_is_not_a_section(make_pdf) -> None:
+    # "...Proprietary" and "Page N of 12" are two lines on most pages and one on the last few;
+    # the merged line used to open a section on every page it appeared on
+    def fill(page: pymupdf.Page, number: int) -> None:
+        if number in (0, 6):
+            page.insert_text((72, 100), f"Chapter {number // 6 + 1} Overview", fontsize=18)
+        body_text(page)
+        if number < 8:
+            page.insert_text((72, 800), FOOTER, fontsize=14)
+            page.insert_text((72, 816), f"Page {number + 1} of 12", fontsize=10)
+        else:
+            page.insert_text((72, 800), f"{FOOTER} Page {number + 1} of 12", fontsize=14)
+
+    info = pdfdoc.inspect(make_pdf("footer", 12, fill))
+
+    assert info.toc_source == "heuristic"
+    assert [(s.page, s.title) for s in info.sections] == [
+        (0, "Chapter 1 Overview"),
+        (6, "Chapter 2 Overview"),
+    ]
+
+
+CONTENTS = [
+    ("1.0", "Introduction", 1),
+    ("1.1", "Safety Precautions", 2),
+    ("2.0", "Installation", 5),
+    ("2.1", "Mounting the Frame", 7),
+    ("3.0", "Maintenance", 11),
+    ("3.1", "Belt Replacement", 14),
+]
+# printed page 1 is the third sheet: a cover and the contents page come first
+OFFSET = 2
+
+
+def contents_pdf(make_pdf, entries, pages: int = 18):
+    def fill(page: pymupdf.Page, number: int) -> None:
+        if number == 1:
+            page.insert_text((72, 80), "Contents", fontsize=16)
+            y = 110
+            for code, title, printed in entries:
+                page.insert_text((72, y), code, fontsize=BODY)
+                y += 14
+                page.insert_text((72, y), f"{title} {'.' * 40} {printed}", fontsize=BODY)
+                y += 14
+            # a figure caption that wraps: its tail carries the leader and must not be a title
+            page.insert_text(
+                (72, y),
+                "Figure 3 Frame bolts with the torque wrench and",
+                fontsize=BODY,
+            )
+            page.insert_text((72, y + 14), f"extension fitted {'.' * 30} 6", fontsize=BODY)
+            return
+        body_text(page)
+        for code, title, printed in entries:
+            if printed - 1 + OFFSET == number:
+                # headings at body size: invisible to the font-size heuristic
+                page.insert_text((72, 110), f"{code} {title}", fontsize=BODY)
+
+    return make_pdf("contents", pages, fill)
+
+
+def test_printed_contents_give_the_sections_at_physical_pages(make_pdf) -> None:
+    info = pdfdoc.inspect(contents_pdf(make_pdf, CONTENTS))
+
+    assert info.toc_source == "contents"
+    assert [(s.page, s.title, s.level) for s in info.sections[1:]] == [
+        (printed - 1 + OFFSET, f"{code} {title}", 1 if code.endswith(".0") else 2)
+        for code, title, printed in CONTENTS
+    ]
+    assert not any("extension" in s.title for s in info.sections)
+
+
+def test_contents_of_one_volume_in_a_merged_document_are_not_used(make_pdf) -> None:
+    # the last entry lands on page 16 of 60: the rest would fall into its section
+    info = pdfdoc.inspect(contents_pdf(make_pdf, CONTENTS, pages=60))
+
+    assert info.toc_source == "heuristic"

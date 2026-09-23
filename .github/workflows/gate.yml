@@ -1,0 +1,48 @@
+# The same gate as `bash .claude/lint.sh` locally, on every push: the rules in .claude/RULES.md
+# otherwise hold only as long as someone remembers to run it.
+name: gate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      # actions pinned by commit, not by a movable tag
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: cli/**/uv.lock
+
+      # the versions the gate is run with locally; Ubuntu's own packages lag behind and
+      # would pass or fail different findings
+      - name: Install shellcheck 0.11.0, shfmt 3.12.0, bats
+        env:
+          SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+          # from the release's sha256sums.txt; shellcheck publishes none, so its hash is the
+          # one computed when this version was pinned
+          SHFMT_SHA256: d9fbb2a9c33d13f47e7618cf362a914d029d02a6df124064fff04fd688a745ea
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -fsSLo shellcheck.tar.xz https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
+          echo "$SHELLCHECK_SHA256  shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf shellcheck.tar.xz
+          sudo install -m 755 shellcheck-v0.11.0/shellcheck /usr/local/bin/shellcheck
+          curl -fsSLo shfmt https://github.com/mvdan/sh/releases/download/v3.12.0/shfmt_v3.12.0_linux_amd64
+          echo "$SHFMT_SHA256  shfmt" | sha256sum -c -
+          sudo install -m 755 shfmt /usr/local/bin/shfmt
+          sudo apt-get update -q
+          sudo apt-get install -yq bats
+          shellcheck --version && shfmt --version && bats --version
+
+      - name: bash .claude/lint.sh
+        run: bash .claude/lint.sh
