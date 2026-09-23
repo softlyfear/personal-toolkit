@@ -85,11 +85,12 @@ def _dedupe_images(pdf: pikepdf.Pdf) -> int:
     return replaced
 
 
-def lossless_pass(src: Path, dst: Path) -> int:
+def lossless_pass(src: Path, dst: Path, *, prune: bool = True) -> int:
     """Structure-only rewrite. Returns the number of deduplicated image objects."""
     with pikepdf.open(src) as pdf:
         replaced = _dedupe_images(pdf)
-        pdf.remove_unreferenced_resources()
+        if prune:
+            pdf.remove_unreferenced_resources()
         pdf.save(
             dst,
             compress_streams=True,
@@ -333,6 +334,16 @@ def compress_file(
                 accepted, lossy_applied = stage, False
                 report = verify(
                     src, accepted, dpi=verify_dpi, sample=verify_sample, strict_pixels=True
+                )
+            if report.failed:
+                # pruning a resources dict that a page shares with a transparency-group form
+                # (WeasyPrint does this) moves MuPDF's blending by one grey level on that page
+                try:
+                    lossless_pass(src, stage, prune=False)
+                except Exception as exc:
+                    raise PdfPrepError(f"{src.name}: lossless pass failed ({exc})") from exc
+                report = verify(
+                    src, stage, dpi=verify_dpi, sample=verify_sample, strict_pixels=True
                 )
             if report.failed:
                 failed = ", ".join(report.failed)

@@ -381,7 +381,10 @@ Points that are easy to break:
   pixel-identity, text-identity, geometry and feature-count checks, or it is not delivered. A lossy
   output falls back to the lossless one on failure, and an output that is not smaller is discarded
   in favour of the source. `compress` writes `result/<source file name>` unchanged, so it refuses to
-  run when that path is the source itself.
+  run when that path is the source itself. A lossless output that fails pixel identity is redone
+  without `remove_unreferenced_resources()`: pruning a resources dict a page shares with a
+  transparency-group form (WeasyPrint) shifts MuPDF's blending by one grey level. `split` treats a
+  rejected compression as an optimisation lost and cuts the source as is.
 - OCR inserts words with `insert_text`, not `insert_textbox`: a textbox silently drops a word that
   does not fit its own bounding box, which produced an empty text layer for a whole document.
 - Parts are built with `Pdf.add_pages_from()`, never `pages.extend()`: the latter drops AcroForm
