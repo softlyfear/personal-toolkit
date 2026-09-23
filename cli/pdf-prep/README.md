@@ -92,9 +92,13 @@ Rules the splitter holds to:
 - parts cover the source exactly once — no gaps, no overlaps;
 - a boundary never cuts a table, a list or a figure away from its caption;
 - a part starts at a section start. Sections come from `toc.json` next to the source, else PDF bookmarks,
-  else font-size heuristics — the manifest records which, and a heuristic run is flagged. A bookmark named
-  after a file (`95587112.pdf`, common in merged manuals) is replaced with the heading printed on its page.
-  The heuristic ignores text repeated on a quarter of the pages or more — running headers and logos.
+  else the printed table of contents, else font-size heuristics — the manifest records which, and a
+  heuristic run is flagged. A printed contents entry is kept only if its title is found on the page it
+  points to, and contents that stop before the second half of the document (one volume of a merged
+  manual) are not used. A bookmark named after a file (`95587112.pdf`, common in merged manuals) is
+  replaced with the heading printed on its page. The heuristic ignores text repeated on a quarter of the
+  pages or more — running headers and logos — and a line that starts with such text, as a footer merged
+  with its page number does.
   After OCR the section map is rebuilt from the new text layer.
 
 A re-run replaces its own previous output for that source (parts, manifests, Markdown), because different

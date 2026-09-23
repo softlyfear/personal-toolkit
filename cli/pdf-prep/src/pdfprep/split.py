@@ -250,6 +250,11 @@ def _caveats(result: SplitResult) -> list[str]:
                 " whose page has no readable heading."
             )
         lines.append(line)
+    elif info.toc_source == "contents":
+        lines.append(
+            "Section titles come from the document's printed table of contents; entries whose"
+            " title was not found on their page were left out."
+        )
     elif info.toc_source == "heuristic":
         lines.append(
             "Section titles were inferred from font size: expect some to be missing and a few"
