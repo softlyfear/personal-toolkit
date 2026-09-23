@@ -98,7 +98,8 @@ Rules the splitter holds to:
   manual) are not used. A bookmark named after a file (`95587112.pdf`, common in merged manuals) is
   replaced with the heading printed on its page. The heuristic ignores text repeated on a quarter of the
   pages or more — running headers and logos — and a line that starts with such text, as a footer merged
-  with its page number does.
+  with its page number does. Numbered headings (`2.1 Maintenance`) count when they are set larger than
+  the body text and follow one ascending numbering through the document.
   After OCR the section map is rebuilt from the new text layer.
 
 A re-run replaces its own previous output for that source (parts, manifests, Markdown), because different
