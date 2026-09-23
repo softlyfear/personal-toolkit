@@ -415,7 +415,11 @@ Points that are easy to break:
   counted per line, footers and drawing labels dominate and every label looks like a heading. Lines
   with fewer than 3 letters are dropped **before** grouping by size, or a bullet glyph set at the
   heading's size hides the heading. Text on a quarter of the pages or more is a running header or
-  logo. Bookmarks named after files (`95587112.pdf`, common in merged manuals) take the heading
+  logo, and so is a line that *starts* with one: a footer and its page number are one line on some
+  pages and two on others. Before the heuristic, a printed contents page (dot leaders) is tried:
+  each entry must be found on its page under one printed-to-physical offset (60% or the contents
+  are dropped), and contents ending before mid-document are dropped — in a merged manual they
+  index one volume and would swallow the rest into their last section. Bookmarks named after files (`95587112.pdf`, common in merged manuals) take the heading
   printed on their page. After OCR the section map is rebuilt (`remap_sections`): the one built at
   intake came from a scan with no text.
 - `task/`, `result/`, `.work/` and `config.toml` are gitignored (`.gitkeep` files excepted) — the

@@ -7,6 +7,7 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass, replace
+from itertools import pairwise
 from pathlib import Path
 
 import pymupdf
@@ -131,7 +132,7 @@ class DocInfo:
     has_images: bool
     text_pages: int
     sections: list[Section]
-    toc_source: str  # toc_json | bookmarks | heuristic
+    toc_source: str  # toc_json | bookmarks | contents | heuristic
     renamed_sections: int = 0  # bookmarks named after files, replaced with the page heading
     undecoded_pages: tuple[int, ...] = ()  # 0-based; a text layer that is not readable text
 
@@ -214,6 +215,10 @@ def _page_lines(page: pymupdf.Page) -> list[tuple[float, str]]:
     return lines
 
 
+# shorter repeated keys are part numbers and section labels, not headers worth prefix-matching
+_RUNNING_PREFIX = 12
+
+
 def _line_key(text: str) -> str:
     return "".join(text.lower().translate(_LOOKALIKES).split())
 
@@ -230,6 +235,16 @@ def _running_keys(pages: list[list[tuple[float, str]]]) -> set[str]:
             counts[key] = counts.get(key, 0) + 1
     threshold = max(3, len(pages) // 4)
     return {key for key, count in counts.items() if count >= threshold}
+
+
+def _is_running(text: str, running: set[str]) -> bool:
+    """A running line, or one that starts with it: a footer and its page number ("…Proprietary"
+    + "Page 84 of 119") are one line on some pages and two on others, so the merged form is
+    unique on every page and never reaches the repeat count on its own."""
+    key = _line_key(text)
+    return key in running or any(
+        len(prefix) >= _RUNNING_PREFIX and key.startswith(prefix) for prefix in running
+    )
 
 
 def _never_a_title(text: str) -> bool:
@@ -260,7 +275,7 @@ def _page_headings(lines: list[tuple[float, str]], running: set[str], body: floa
         for size, text in lines
         if len(text) <= 90
         and sum(char.isalpha() for char in text) >= 3
-        and _line_key(text) not in running
+        and not _is_running(text, running)
         and not _never_a_title(text)
     ]
     for size in sorted({size for size, _ in lines}, reverse=True):
@@ -338,6 +353,84 @@ def resolve_file_titles(doc: pymupdf.Document, sections: list[Section]) -> int:
     return len(targets)
 
 
+_CONTENTS_ENTRY = re.compile(r"^(?P<title>.*?\S)\s*(?:\.\s?){3,}\s*(?P<page>\d{1,4})$")
+_SECTION_NUMBER = re.compile(r"^\d+(?:\.\d+)*\.?$")
+
+
+def _contents_entries(doc: pymupdf.Document) -> list[tuple[str, str, int]]:
+    """(number, title, printed page) from a printed table of contents with dot leaders.
+
+    The number often sits on a line of its own ("1.0" / "Introduction .... 12"), and a long
+    entry wraps: its tail carries the leader and the page, its head is the line before.
+    """
+    entries: list[tuple[str, str, int]] = []
+    for page in doc.pages(0, min(doc.page_count, 20)):
+        previous = ""
+        for raw in page.get_text("text").splitlines():
+            line = " ".join(raw.split())
+            match = _CONTENTS_ENTRY.match(line)
+            if match:
+                title = match["title"]
+                wrapped = previous and not _CONTENTS_ENTRY.match(previous) and _opens_lower(title)
+                if wrapped and not _SECTION_NUMBER.match(previous):
+                    title, previous = f"{previous} {title}", ""
+                number = previous if _SECTION_NUMBER.match(previous) else ""
+                head, _, rest = title.partition(" ")
+                if not number and _SECTION_NUMBER.match(head) and rest:
+                    number, title = head, rest
+                if not _CAPTION.match(title) and sum(char.isalpha() for char in title) >= 3:
+                    entries.append((number, title, int(match["page"])))
+            if line:
+                previous = line
+    return entries
+
+
+def _sections_from_contents(doc: pymupdf.Document) -> list[Section] | None:
+    """Sections from the printed contents, each one kept only if its title is found on the
+    page it points to. The offset between printed and physical page numbers is the one
+    that verifies the most entries; under 60% verified, the contents are not trusted."""
+    entries = _contents_entries(doc)
+    if len(entries) < 5:
+        return None
+    printed = [page for _, _, page in entries]
+    if sum(b < a for a, b in pairwise(printed)) > len(printed) // 10:
+        return None
+    page_keys = [_line_key(page.get_text("text")) for page in doc]
+    title_keys = [_line_key(title)[:30] for _, title, _ in entries]
+
+    def verified(offset: int) -> list[int]:
+        found = []
+        for index, (key, page) in enumerate(zip(title_keys, printed, strict=True)):
+            physical = page - 1 + offset
+            if 0 <= physical < doc.page_count and key in page_keys[physical]:
+                found.append(index)
+        return found
+
+    best = max((verified(offset) for offset in range(-10, 31)), key=len)
+    if len(best) < 0.6 * len(entries):
+        return None
+    offset = next(o for o in range(-10, 31) if verified(o) == best)
+    # the contents of one volume in a merged document would put the rest into its last section
+    if printed[best[-1]] - 1 + offset < doc.page_count // 2:
+        return None
+    out: list[Section] = []
+    numbered_level = 0
+    for index in best:
+        number, title, page = entries[index]
+        if number:
+            # "1.0" is a chapter, "1.1" a level below it
+            numbered_level = max(1, len([part for part in number.split(".") if part.strip("0")]))
+            level = numbered_level
+        else:
+            # an unnumbered entry sits under the numbered one before it
+            level = numbered_level + 1 if numbered_level else 1
+        out.append(Section(page - 1 + offset, f"{number} {title}".strip(), level))
+    out.sort(key=lambda section: section.page)
+    if out[0].page != 0:
+        out.insert(0, Section(0, (doc.metadata or {}).get("title") or "Front matter", 1))
+    return out
+
+
 def section_map(
     doc: pymupdf.Document, source: Path, toc_json: Path | None
 ) -> tuple[list[Section], str]:
@@ -348,6 +441,9 @@ def section_map(
     sections = _sections_from_bookmarks(doc)
     if sections:
         return sections, "bookmarks"
+    sections = _sections_from_contents(doc)
+    if sections:
+        return sections, "contents"
     return _sections_heuristic(doc), "heuristic"
 
 
@@ -463,7 +559,7 @@ def continuation_pages(doc: pymupdf.Document) -> set[int]:
         body = [
             (top, bottom, text)
             for top, bottom, text in lines
-            if _line_key(text) not in running and sum(char.isalpha() for char in text) >= 3
+            if not _is_running(text, running) and sum(char.isalpha() for char in text) >= 3
         ]
         tables = []
         try:
