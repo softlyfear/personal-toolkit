@@ -106,12 +106,13 @@ def _display_targets(path: Path, target_dpi: int) -> dict[int, int]:
     doc = pymupdf.open(path)
     try:
         for page in doc:
-            for info in page.get_images(full=True):
-                xref = info[0]
-                rects = page.get_image_rects(xref)
-                if not rects:
+            # one content-stream pass per page; get_image_rects per image re-parses the page
+            # each time and took minutes on a 1000-page manual
+            for placed in page.get_image_info(xrefs=True):
+                xref = placed.get("xref", 0)
+                if not xref:
                     continue
-                width_pt = max(rect.width for rect in rects)
+                width_pt = pymupdf.Rect(placed["bbox"]).width
                 want = max(64, int(width_pt / 72.0 * target_dpi))
                 targets[xref] = max(targets.get(xref, 0), want)
     finally:
@@ -119,8 +120,20 @@ def _display_targets(path: Path, target_dpi: int) -> dict[int, int]:
     return targets
 
 
+_BILEVEL_FILTERS = {"/CCITTFaxDecode", "/JBIG2Decode"}
+
+
+def _is_bilevel(obj: pikepdf.Object) -> bool:
+    """A 1-bit scan: CCITT/JBIG2 already store it smaller than any JPEG could, and a grey JPEG
+    of text or line art only adds ringing. Decoding one to find that out costs minutes — a
+    single A0 drawing is half a gigapixel — so the header alone decides."""
+    filters = obj.get("/Filter")
+    names = {str(f) for f in filters} if isinstance(filters, pikepdf.Array) else {str(filters)}
+    return int(obj.get("/BitsPerComponent", 8)) == 1 or bool(names & _BILEVEL_FILTERS)
+
+
 def _recode_image(obj: pikepdf.Object, target_px: int, quality: int) -> bool:
-    if obj.get("/ImageMask", False):
+    if obj.get("/ImageMask", False) or _is_bilevel(obj):
         return False
     try:
         pillow = pikepdf.PdfImage(obj).as_pil_image()
@@ -130,6 +143,10 @@ def _recode_image(obj: pikepdf.Object, target_px: int, quality: int) -> bool:
         return False
     if pillow.mode not in ("RGB", "L"):
         pillow = pillow.convert("L" if pillow.mode in ("1", "I;16", "I") else "RGB")
+    # box-reduce by an integer factor first: LANCZOS over the full original is the slow part
+    factor = pillow.width // (target_px * 2)
+    if factor >= 2:
+        pillow = pillow.reduce(factor)
     ratio = target_px / pillow.width
     resized = pillow.resize((target_px, max(1, int(pillow.height * ratio))), Image.LANCZOS)
     buffer = io.BytesIO()
@@ -281,56 +298,60 @@ def compress_file(
     work_dir.mkdir(parents=True, exist_ok=True)
     size_in = src.stat().st_size
     stage = work_dir / f"{src.stem}.lossless.pdf"
-
-    try:
-        lossless_pass(src, stage)
-    except Exception as exc:
-        raise PdfPrepError(f"{src.name}: lossless pass failed ({exc})") from exc
-
-    accepted = stage
-    lossy_applied = False
     lossy = work_dir / f"{src.stem}.lossy.pdf"
+    # a rejected run must not leave source-sized intermediates behind in the work dir
     try:
-        recoded = lossy_pass(src, lossy, target_dpi, jpeg_quality)
-    except Exception as exc:
-        warn(f"{src.name}: lossy pass skipped ({exc})")
-        recoded = 0
-    if recoded and lossy.is_file() and lossy.stat().st_size < stage.stat().st_size:
-        accepted = lossy
-        lossy_applied = True
-    elif lossy.is_file():
-        lossy.unlink()
+        try:
+            lossless_pass(src, stage)
+        except Exception as exc:
+            raise PdfPrepError(f"{src.name}: lossless pass failed ({exc})") from exc
 
-    report = verify(
-        src,
-        accepted,
-        dpi=verify_dpi,
-        sample=verify_sample,
-        strict_pixels=not lossy_applied,
-    )
-    if report.failed:
-        if lossy_applied:
-            warn(
-                f"{src.name}: lossy output rejected ({', '.join(report.failed)}), keeping lossless"
-            )
-            accepted, lossy_applied = stage, False
-            report = verify(src, accepted, dpi=verify_dpi, sample=verify_sample, strict_pixels=True)
+        accepted = stage
+        lossy_applied = False
+        try:
+            recoded = lossy_pass(src, lossy, target_dpi, jpeg_quality)
+        except Exception as exc:
+            warn(f"{src.name}: lossy pass skipped ({exc})")
+            recoded = 0
+        if recoded and lossy.is_file() and lossy.stat().st_size < stage.stat().st_size:
+            accepted = lossy
+            lossy_applied = True
+        elif lossy.is_file():
+            lossy.unlink()
+
+        report = verify(
+            src,
+            accepted,
+            dpi=verify_dpi,
+            sample=verify_sample,
+            strict_pixels=not lossy_applied,
+        )
         if report.failed:
-            raise PdfPrepError(
-                f"{src.name}: compression rejected by acceptance checks: {', '.join(report.failed)}"
-            )
+            if lossy_applied:
+                failed = ", ".join(report.failed)
+                warn(f"{src.name}: lossy output rejected ({failed}), keeping lossless")
+                accepted, lossy_applied = stage, False
+                report = verify(
+                    src, accepted, dpi=verify_dpi, sample=verify_sample, strict_pixels=True
+                )
+            if report.failed:
+                failed = ", ".join(report.failed)
+                raise PdfPrepError(
+                    f"{src.name}: compression rejected by acceptance checks: {failed}"
+                )
 
-    size_out = accepted.stat().st_size
-    no_gain = size_out >= size_in
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    deliverable = src if no_gain else accepted
-    # copyfile, not read_bytes/write_bytes: a 100 MB source would otherwise go through RAM.
-    # src and dst are the same file when a part is recompressed in place and shows no gain.
-    if not (dst.exists() and deliverable.samefile(dst)):
-        shutil.copyfile(deliverable, dst)
-    for leftover in (stage, lossy):
-        if leftover.exists() and leftover != dst:
-            leftover.unlink()
+        size_out = accepted.stat().st_size
+        no_gain = size_out >= size_in
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        deliverable = src if no_gain else accepted
+        # copyfile, not read_bytes/write_bytes: a 100 MB source would otherwise go through RAM.
+        # src and dst are the same file when a part is recompressed in place and shows no gain.
+        if not (dst.exists() and deliverable.samefile(dst)):
+            shutil.copyfile(deliverable, dst)
+    finally:
+        for leftover in (stage, lossy):
+            if leftover.exists() and leftover != dst:
+                leftover.unlink()
 
     return CompressResult(
         size_in=size_in,

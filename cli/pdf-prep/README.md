@@ -25,9 +25,21 @@ It installs `uv` if missing, creates `.venv` with every dependency, creates `tas
 doctor`. It downloads nothing from this repository — the directory it ships in is the whole application.
 Re-run it to update after `git pull`.
 
-The heavy part is OCR: `easyocr` needs `torch`. `pyproject.toml` pins the **CPU** wheel index, so the
-download is a few hundred MB instead of ~2.5 GB. EasyOCR model weights land in `.work/ocr-models` on first
-use.
+The heavy part is OCR: `easyocr` needs `torch`, and OCR runs many times faster on a GPU. The installer
+probes the machine and picks one torch build, all of it inside `.venv`:
+
+| Build | When | Size |
+| --- | --- | --- |
+| `cuda` | NVIDIA, driver with CUDA 13+, compute capability 7.5+ | several GB |
+| `rocm-linux` | Linux, Radeon RX 6800/6900, RX 7600+, RX 9000, Strix Halo | several GB |
+| `rocm-windows` | Windows, Radeon RX 7600+ / RX 9000 / PRO W7000+ (AMD's own wheels, Python 3.12) | several GB |
+| `cpu` | anything else, and the fallback | a few hundred MB |
+
+A matching GPU is only a candidate: after the install the build must run a convolution and an LSTM on
+the device, or the installer falls back to `cpu`. `PDFPREP_TORCH=cpu` skips the probe. The choice is
+written into the `pdf-prep` launcher; `pdf-prep doctor` shows the device OCR will use, and
+`[ocr] device` in `config.toml` can force `cpu`. A GPU that runs out of memory mid-document hands the
+rest of it to the CPU. EasyOCR model weights land in `.work/ocr-models` on first use.
 
 ## Use
 
@@ -41,7 +53,9 @@ pdf-prep doctor --llm                 # check environment, paths, fonts and the 
 ```
 
 Every command reads all PDFs under `task/` (recursively) and writes straight into `result/`, flat —
-no per-document subfolders. Every name carries the source slug, so outputs never collide.
+no per-document subfolders. Every name carries the source slug, so outputs never collide; two sources
+with the same name in different folders (`a/manual.pdf`, `b/manual.pdf`) get the folder in their slug.
+`compress` is the exception: its output mirrors the source's folder.
 `--scope manual vendor-a` limits a run to matching files or folders. Artifacts of earlier runs
 (`--part_`, `--manifest.`, `--translated`) are never picked up as sources.
 
@@ -95,11 +109,12 @@ Where no boundary satisfies all of that, the part is flagged in the manifest (`s
 `forced_split` with a reason) rather than silently moved. A scanned source is OCR'd first so the sections
 and protected blocks can be detected at all.
 
-`--ocr auto` (default) only OCRs a document that has no text layer anywhere. A **mixed** document — typeset
-pages plus drawings or scanned inserts — keeps those pages unreadable until you ask for it:
+By default every page without a readable text layer is OCR'd before the split — scans, drawings, and pages
+whose fonts extract as noise (no Unicode map). Typeset pages are left alone, so the cost is proportional to
+the pages that actually need it: minutes of CPU for a manual with a few hundred drawings.
 
 ```bash
-pdf-prep split --ocr always     # OCR every page that lacks a text layer, then split
+pdf-prep split --ocr auto       # OCR only a document that has no text layer at all
 pdf-prep split --ocr never      # skip OCR entirely
 ```
 
@@ -113,7 +128,8 @@ Every run ends with a validation table: size, pages, coverage, unique names, fil
 pdf-prep compress
 ```
 
-The output keeps the source's file name: `task/manual.pdf` becomes `result/manual.pdf`. Two passes run
+The output keeps the source's file name and folder: `task/vendor/manual.pdf` becomes
+`result/vendor/manual.pdf`. Two passes run
 on every file:
 
 | Pass       | What it does                                                                                                                                                                                     |

@@ -18,6 +18,7 @@ CLAUDE_CLI = "claude-cli"
 ANTHROPIC_API = "anthropic-api"
 OPENAI_COMPATIBLE = "openai-compatible"
 PROVIDERS = (CLAUDE_CLI, ANTHROPIC_API, OPENAI_COMPATIBLE)
+OCR_DEVICES = ("auto", "gpu", "cpu")
 
 DEFAULT_KEY_ENV = {
     CLAUDE_CLI: "",
@@ -60,6 +61,7 @@ class Config:
     verify_dpi: int = 150
     ocr_enabled: bool = True
     ocr_languages: tuple[str, ...] = ("en", "ru")
+    ocr_device: str = "auto"  # auto | gpu | cpu
     llm: LlmConfig = field(default_factory=LlmConfig)
 
 
@@ -151,6 +153,13 @@ def _resolve_llm(data: dict, provider_cli: str | None, model_cli: str | None) ->
     )
 
 
+def _ocr_device(value: object) -> str:
+    device = str(value).strip().lower()
+    if device not in OCR_DEVICES:
+        raise PdfPrepError(f"ocr device must be one of {', '.join(OCR_DEVICES)}, got {value!r}")
+    return device
+
+
 def load(
     *,
     task_dir: str | None = None,
@@ -194,5 +203,6 @@ def load(
         verify_dpi=_as_int(comp.get("verify_dpi", 150), "verify_dpi"),
         ocr_enabled=bool(ocr.get("enabled", True)),
         ocr_languages=tuple(str(lang) for lang in languages),
+        ocr_device=_ocr_device(_pick(None, "PDFPREP_OCR_DEVICE", ocr.get("device"), "auto")),
         llm=_resolve_llm(data, provider, model),
     )

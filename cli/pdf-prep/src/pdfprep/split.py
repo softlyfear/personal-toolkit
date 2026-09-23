@@ -226,6 +226,17 @@ def _manifest_payload(result: SplitResult) -> dict:
     }
 
 
+def _page_ranges(pages: tuple[int, ...]) -> str:
+    """0-based pages -> "12, 40–47" in original 1-based numbering."""
+    spans: list[list[int]] = []
+    for page in sorted(pages):
+        if spans and page == spans[-1][1] + 1:
+            spans[-1][1] = page
+        else:
+            spans.append([page, page])
+    return ", ".join(f"{a + 1}" if a == b else f"{a + 1}–{b + 1}" for a, b in spans)
+
+
 def _caveats(result: SplitResult) -> list[str]:
     info = result.info
     lines: list[str] = []
@@ -245,6 +256,12 @@ def _caveats(result: SplitResult) -> list[str]:
         )
     else:
         lines.append("Section titles come from a supplied toc.json.")
+    if info.undecoded_pages and not result.ocr_applied:
+        lines.append(
+            f"Pages {_page_ranges(info.undecoded_pages)} have a text layer that does not decode"
+            " to readable text (fonts without a Unicode map): read them from the page image,"
+            " their extracted text is noise."
+        )
     if result.ocr_applied:
         lines.append(
             f"The text layer was produced by OCR ({result.ocr_engine}): numbers, part codes,"

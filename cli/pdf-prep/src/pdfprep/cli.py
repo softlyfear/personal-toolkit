@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from pdfprep import __version__, compress, ocr, pdfdoc, split, translate
@@ -34,12 +35,13 @@ def _sources(cfg: Config, scope: list[str] | None) -> list[Path]:
     return found
 
 
-def _inspect_all(sources: list[Path]) -> tuple[dict[Path, DocInfo], list[str]]:
+def _inspect_all(sources: list[Path], cfg: Config) -> tuple[dict[Path, DocInfo], list[str]]:
     infos: dict[Path, DocInfo] = {}
     skipped: list[str] = []
+    slugs = pdfdoc.unique_slugs(sources, cfg.task_dir)
     for source in sources:
         try:
-            infos[source] = pdfdoc.inspect(source)
+            infos[source] = replace(pdfdoc.inspect(source), slug=slugs[source])
         except PdfPrepError as exc:
             warn(f"skipped: {exc}")
             skipped.append(str(exc))
@@ -58,10 +60,10 @@ def _print_checks(title: str, checks: list[tuple[str, str, str]]) -> bool:
 
 
 def _maybe_ocr(
-    source: Path, doc_info: DocInfo, cfg: Config, mode: str = "auto"
+    source: Path, doc_info: DocInfo, cfg: Config, mode: str = "always"
 ) -> tuple[Path, int, str | None]:
-    # auto only covers a document with no text layer at all; a Mixed document whose drawings
-    # lack text needs `--ocr always`, since OCR'ing hundreds of typeset pages is wasted work
+    # always is the default: only pages without a readable text layer are OCR'd, so a typeset
+    # page costs nothing, while the drawings and scans of a Mixed document become searchable
     wanted = mode == "always" or (mode == "auto" and doc_info.kind in ("Scanned", "ImageBased"))
     if not cfg.ocr_enabled or mode == "never" or not wanted:
         return source, 0, None
@@ -70,15 +72,41 @@ def _maybe_ocr(
         return source, 0, None
     cfg.work_dir.mkdir(parents=True, exist_ok=True)
     target = cfg.work_dir / f"{doc_info.slug}--ocr.pdf"
-    step(f"{source.name}: OCR on {doc_info.pages - doc_info.text_pages} pages without a text layer")
-    pages, engine = ocr.add_text_layer(source, target, cfg.ocr_languages, cfg.work_dir)
+    missing = doc_info.pages - doc_info.text_pages
+    step(f"{source.name}: OCR on {missing} pages without a readable text layer")
+    pages, engine = ocr.add_text_layer(
+        source, target, cfg.ocr_languages, cfg.work_dir, cfg.ocr_device
+    )
     ok(f"{source.name}: OCR added a text layer to {pages} pages ({engine})")
     return target, pages, engine
 
 
+def _drop_staged(staged: Path, source: Path) -> None:
+    # the OCR'd copy is as large as the source and one is left per document otherwise
+    if staged != source:
+        staged.unlink(missing_ok=True)
+
+
+def _compressed_copy(source: Path, doc_info: DocInfo, cfg: Config) -> Path:
+    """A compressed copy in the work dir, for commands whose output embeds the source pages."""
+    target = cfg.work_dir / f"{doc_info.slug}--compressed.pdf"
+    step(f"{source.name}: compressing at {cfg.target_dpi} dpi / q{cfg.jpeg_quality} first")
+    result = compress.compress_file(
+        source,
+        target,
+        target_dpi=cfg.target_dpi,
+        jpeg_quality=cfg.jpeg_quality,
+        verify_dpi=cfg.verify_dpi,
+        verify_sample=cfg.verify_sample_pages,
+        work_dir=cfg.work_dir,
+    )
+    info(f"{source.name}: {result.size_in / MB:.2f} MB → {result.size_out / MB:.2f} MB")
+    return target
+
+
 def cmd_split(args, cfg: Config) -> int:
     sources = _sources(cfg, args.scope)
-    infos, skipped = _inspect_all(sources)
+    infos, skipped = _inspect_all(sources, cfg)
     failures = 0
     for source in sources:
         doc_info = infos.get(source)
@@ -95,6 +123,7 @@ def cmd_split(args, cfg: Config) -> int:
                 f"{source.name}: {doc_info.renamed_sections} bookmarks were file names, "
                 "renamed after the heading on their page"
             )
+        staged = source
         try:
             staged, ocr_pages, engine = _maybe_ocr(source, doc_info, cfg, args.ocr)
             if engine:
@@ -113,6 +142,8 @@ def cmd_split(args, cfg: Config) -> int:
             error(str(exc))
             failures += 1
             continue
+        finally:
+            _drop_staged(staged, source)
 
         print(f"\n## {source.name} → {result.result_dir}")
         summary = f"branch {result.branch} · {len(result.parts)} parts"
@@ -144,7 +175,7 @@ def cmd_split(args, cfg: Config) -> int:
             if part.forced_split:
                 warn(f"{part.file}: forced split — {part.forced_split_reason}")
             elif part.section_split:
-                warn(f"{part.file}: cut at a subsection, not a section start")
+                warn(f"{part.file}: cut inside a section — none starts within the limits")
         for note in result.notes:
             info(note)
         if result.replaced:
@@ -161,7 +192,8 @@ def cmd_compress(args, cfg: Config) -> int:
     rows: list[list[str]] = []
     for source in sources:
         cfg.result_dir.mkdir(parents=True, exist_ok=True)
-        dst = cfg.result_dir / source.name
+        # same name and subfolder as in task/: flat, two manual.pdf would overwrite each other
+        dst = cfg.result_dir / source.relative_to(cfg.task_dir)
         # The output keeps the source name, so a result dir pointed at task/ would eat the original.
         if dst.resolve() == source.resolve():
             error(f"{source.name}: result dir is the source dir — refusing to overwrite the source")
@@ -184,7 +216,7 @@ def cmd_compress(args, cfg: Config) -> int:
             continue
         rows.append(
             [
-                source.name,
+                str(source.relative_to(cfg.task_dir)),
                 f"{result.size_in / MB:.2f}",
                 f"{result.size_out / MB:.2f}",
                 f"{result.reduction_pct:.2f}%",
@@ -204,13 +236,16 @@ def cmd_compress(args, cfg: Config) -> int:
 def cmd_ocr(args, cfg: Config) -> int:
     sources = _sources(cfg, args.scope)
     failures = 0
+    slugs = pdfdoc.unique_slugs(sources, cfg.task_dir)
     for source in sources:
-        slug = pdfdoc.slugify(source.stem)
+        slug = slugs[source]
         cfg.result_dir.mkdir(parents=True, exist_ok=True)
         dst = cfg.result_dir / f"{slug}--ocr.pdf"
         step(f"{source.name}: OCR ({', '.join(cfg.ocr_languages)})")
         try:
-            pages, engine = ocr.add_text_layer(source, dst, cfg.ocr_languages, cfg.work_dir)
+            pages, engine = ocr.add_text_layer(
+                source, dst, cfg.ocr_languages, cfg.work_dir, cfg.ocr_device
+            )
         except PdfPrepError as exc:
             error(str(exc))
             failures += 1
@@ -223,7 +258,7 @@ def cmd_ocr(args, cfg: Config) -> int:
 
 def cmd_translate(args, cfg: Config) -> int:
     sources = _sources(cfg, args.scope)
-    infos, _ = _inspect_all(sources)
+    infos, _ = _inspect_all(sources, cfg)
     glossary = ""
     if args.glossary:
         path = Path(args.glossary).expanduser()
@@ -238,11 +273,16 @@ def cmd_translate(args, cfg: Config) -> int:
         doc_info = infos.get(source)
         if doc_info is None:
             continue
+        staged = compressed = source
         try:
             staged, ocr_pages, engine = _maybe_ocr(source, doc_info, cfg, args.ocr)
+            # only the pdf format carries the source pages into the output; markdown and docx
+            # hold text alone, so compressing for them would cost minutes and save nothing
+            if args.format == "pdf":
+                compressed = _compressed_copy(staged, doc_info, cfg)
             step(f"{source.name}: translating into {args.lang} as {args.format}")
             result = translate.translate_source(
-                staged,
+                compressed,
                 cfg,
                 doc_info,
                 provider=provider,
@@ -258,6 +298,9 @@ def cmd_translate(args, cfg: Config) -> int:
             error(str(exc))
             failures += 1
             continue
+        finally:
+            _drop_staged(staged, source)
+            _drop_staged(compressed, source)
 
         print(f"\n## {source.name} → {result.result_dir}")
         print(
@@ -280,7 +323,7 @@ def cmd_translate(args, cfg: Config) -> int:
 
 def cmd_list(args, cfg: Config) -> int:
     sources = _sources(cfg, args.scope)
-    infos, _ = _inspect_all(sources)
+    infos, _ = _inspect_all(sources, cfg)
     print()
     print(
         table(
@@ -327,6 +370,13 @@ def cmd_doctor(args, cfg: Config) -> int:
             checks.append(("import easyocr", "pass", ", ".join(cfg.ocr_languages)))
         except ImportError as exc:
             checks.append(("import easyocr", "fail", str(exc)[:80]))
+        usable, detail = ocr.gpu_status()
+        if cfg.ocr_device == "cpu":
+            checks.append(("ocr device", "pass", "cpu (forced in config)"))
+        elif usable:
+            checks.append(("ocr device", "pass", f"gpu · {detail}"))
+        else:
+            checks.append(("ocr device", "pass", f"cpu · {detail}"))
 
     font = find_font()
     checks.append(
@@ -375,8 +425,9 @@ def build_parser() -> argparse.ArgumentParser:
     split_cmd.add_argument(
         "--ocr",
         choices=("auto", "always", "never"),
-        default="auto",
-        help="auto: only a document with no text layer; always: every page that lacks one",
+        default="always",
+        help="always (default): every page that lacks a readable text layer; "
+        "auto: only a document with none at all",
     )
     split_cmd.set_defaults(func=cmd_split)
 
@@ -397,8 +448,9 @@ def build_parser() -> argparse.ArgumentParser:
     translate_cmd.add_argument(
         "--ocr",
         choices=("auto", "always", "never"),
-        default="auto",
-        help="auto: only a document with no text layer; always: every page that lacks one",
+        default="always",
+        help="always (default): every page that lacks a readable text layer; "
+        "auto: only a document with none at all",
     )
     translate_cmd.set_defaults(func=cmd_translate)
 

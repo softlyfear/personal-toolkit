@@ -22,9 +22,13 @@ verify_sample_pages = 12
 verify_dpi = 150
 
 [ocr]
-# Applied only to pages with no text layer.
+# Applied only to pages without a readable text layer.
 enabled = true
 languages = ["en", "ru"]
+# auto — the GPU when torch sees one with room for the models, else the CPU
+# gpu  — same, but warn when it falls back; cpu — never touch the GPU
+# Which GPU builds are available is decided by install.sh; see `pdf-prep doctor`.
+device = "auto"
 
 [llm]
 # claude-cli       — the `claude` CLI on your Claude subscription (default, no API key)

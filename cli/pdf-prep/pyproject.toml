@@ -13,24 +13,88 @@ dependencies = [
     "easyocr>=1.7.2",
     "anthropic>=0.40",
     "openai>=1.55",
-    # Direct dependencies only so [tool.uv.sources] below can pin them; easyocr pulls them anyway
-    "torch>=2.2",
-    "torchvision>=0.17",
 ]
 
 [project.scripts]
 pdf-prep = "pdfprep.cli:main"
 
-# easyocr pulls torch; the default PyPI wheel carries the CUDA runtime (~2.5 GB).
-# This index pins the CPU build instead — same OCR, roughly a tenth of the download.
+# easyocr pulls torch, and plain PyPI torch drags in the CUDA runtime whatever the machine has.
+# One build per group instead, picked by install.sh after it probes the GPU. The groups are
+# mutually exclusive, and `cpu` is the default so a bare `uv run` never swaps in a GPU build.
+# torch/torchvision are listed here only so [tool.uv.sources] can pin them: sources apply to
+# direct dependencies alone, and as easyocr's transitive deps the pin would be ignored.
+[dependency-groups]
+cpu = ["torch>=2.2", "torchvision>=0.17"]
+# CUDA 13.2 wheels: RTX 50xx (Blackwell) needs 12.8+, and cu128 stopped at torch 2.11
+cuda = ["torch>=2.2", "torchvision>=0.17"]
+# triton-rocm is torch's own dependency, but it exists only on the PyTorch index
+rocm-linux = ["torch>=2.2", "torchvision>=0.17", "triton-rocm; sys_platform == 'linux'"]
+# AMD's own Windows build: Python 3.12 only, RDNA3/RDNA4. torch's rocm-sdk dependencies are
+# listed so they resolve from AMD's index too — PyPI does not carry them.
+rocm-windows = [
+    "torch>=2.9; sys_platform == 'win32'",
+    "torchvision>=0.24; sys_platform == 'win32'",
+    "rocm[libraries]==7.2.1; sys_platform == 'win32'",
+    "rocm-sdk-core==7.2.1; sys_platform == 'win32'",
+    "rocm-sdk-libraries-custom==7.2.1; sys_platform == 'win32'",
+]
+
+[tool.uv]
+default-groups = ["cpu"]
+conflicts = [
+    [{ group = "cpu" }, { group = "cuda" }, { group = "rocm-linux" }, { group = "rocm-windows" }],
+]
+
+# AMD ships `rocm` as an sdist whose setup.py only runs on Windows; building it just to read its
+# metadata stalls `uv lock` on Linux. These are its requirements, copied from its PKG-INFO.
+[[tool.uv.dependency-metadata]]
+name = "rocm"
+version = "7.2.1"
+requires-dist = [
+    "rocm-sdk-core==7.2.1",
+    "rocm-sdk-libraries-custom==7.2.1; extra == 'libraries'",
+    "rocm-sdk-devel==7.2.1; extra == 'devel'",
+]
+provides-extras = ["libraries", "devel"]
+
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
+[[tool.uv.index]]
+name = "pytorch-cu132"
+url = "https://download.pytorch.org/whl/cu132"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-rocm"
+url = "https://download.pytorch.org/whl/rocm7.2"
+explicit = true
+
+[[tool.uv.index]]
+name = "amd-rocm-windows"
+url = "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/"
+format = "flat"
+explicit = true
+
 [tool.uv.sources]
-torch = [{ index = "pytorch-cpu" }]
-torchvision = [{ index = "pytorch-cpu" }]
+torch = [
+    { index = "pytorch-cpu", group = "cpu" },
+    { index = "pytorch-cu132", group = "cuda" },
+    { index = "pytorch-rocm", group = "rocm-linux" },
+    { index = "amd-rocm-windows", group = "rocm-windows" },
+]
+torchvision = [
+    { index = "pytorch-cpu", group = "cpu" },
+    { index = "pytorch-cu132", group = "cuda" },
+    { index = "pytorch-rocm", group = "rocm-linux" },
+    { index = "amd-rocm-windows", group = "rocm-windows" },
+]
+triton-rocm = [{ index = "pytorch-rocm", group = "rocm-linux" }]
+rocm = [{ index = "amd-rocm-windows", group = "rocm-windows" }]
+rocm-sdk-core = [{ index = "amd-rocm-windows", group = "rocm-windows" }]
+rocm-sdk-libraries-custom = [{ index = "amd-rocm-windows", group = "rocm-windows" }]
 
 [build-system]
 requires = ["hatchling"]
