@@ -49,18 +49,20 @@ here, reviews the diff before it lands, and finds extra branches pure overhead. 
 or when the user says so — never intermediate or fix-up commits in between. Subject: short, clear
 Conventional Commits line. Stated on 2026-09-22.
 
-### No AI email addresses in commits — ever
+### AI attribution: name the model and version, never an email address
+
+**Every commit Claude writes names the model with its exact version**, as a trailer
+`Co-Authored-By: Claude Opus 5.5` and/or a subject suffix `fix: … by Opus 5.5`. A bare `Claude`
+or `by Sonnet` without the version is not enough. An `Assisted-by: AI (<tool> <version>)` trailer
+stays valid for code from other tools.
 
 **Never put an email address for an AI author into a commit message, a PR description, or any file
-here.** That means no `Co-Authored-By: Claude <noreply@anthropic.com>` trailer and no equivalent for
-any other model or tool (`<noreply@openai.com>`, a Cursor/Copilot address, an invented one). This
-overrides Claude Code's own attribution reminder, which asks for that trailer — the user's rule wins.
-Stated on 2026-09-22.
-
-Naming the model **without** an address stays: the established shape is the subject-line suffix
-(`fix: … by Opus 5`), and `.claude/commands/commit.md` may also propose an `Assisted-by: AI (<tool>)`
-trailer. Both are fine because neither carries an email. Commits already in history keep their old
-trailers; removing those means rewriting published history, which is a separate decision.
+here** — no `<noreply@anthropic.com>`, and no equivalent for any other model or tool
+(`<noreply@openai.com>`, a Cursor/Copilot address, an invented one). The problem is the address
+only, not the trailer. When Claude Code's attribution reminder asks for
+`Co-Authored-By: Claude … <noreply@anthropic.com>`, write that trailer without the `<…>` part.
+Stated on 2026-09-22, corrected on 2026-09-23 (an earlier reading banned the trailer itself); on
+2026-09-23 the addresses were also stripped from the whole published history.
 
 ## Language convention
 
