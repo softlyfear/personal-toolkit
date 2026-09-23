@@ -3,12 +3,13 @@
 # lint.sh — the repository's quality gate: formatting, static analysis, unit tests.
 #
 # Usage:  bash .claude/lint.sh
-# Requires: shfmt, shellcheck, bats (see .claude/RULES.md "Tooling")
+# Requires: shfmt, shellcheck, bats (see .claude/RULES.md "Tooling"), uv
 #
 # Runs strictly in this order and stops at the first failure:
 #   1. shfmt -d                  formatting differences
 #   2. shellcheck -x -S style    static analysis
 #   3. bats .claude/testing/unit/   unit tests
+#   4. ruff format/check on cli/, pytest .claude/testing/pdf-prep/
 #
 # Any non-zero exit fails the build. Nothing here rewrites files — use
 # `shfmt -i 2 -ci -bn -sr -w` yourself to fix formatting.
@@ -24,6 +25,9 @@ readonly SHFMT_FLAGS=(-i 2 -ci -bn -sr)
 readonly SHELLCHECK_FLAGS=(-x -S style)
 # All tests live under .claude/testing/ — unit tests here, Docker scenario suites alongside.
 readonly UNIT_TEST_DIR=".claude/testing/unit"
+readonly PYTHON_DIR="cli"
+readonly PDFPREP_DIR="cli/pdf-prep"
+readonly PDFPREP_TEST_DIR=".claude/testing/pdf-prep"
 
 # =============================================================================
 # UI helpers
@@ -84,7 +88,7 @@ main() {
   repo_root="$(git rev-parse --show-toplevel)" || err "Not inside a git repository"
   cd "${repo_root}" || err "Cannot enter repository root: ${repo_root}"
 
-  require_tools shfmt shellcheck bats git
+  require_tools shfmt shellcheck bats git uv uvx
 
   local -a files=()
   # shellcheck disable=SC2312 # an empty file list is caught by the count check on the next line
@@ -93,7 +97,7 @@ main() {
 
   info "Checking ${#files[@]} shell files"
 
-  info "1/3 shfmt -d"
+  info "1/4 shfmt -d"
   # shellcheck disable=SC2312 # exit status of this substitution is intentionally unused here
   shfmt "${SHFMT_FLAGS[@]}" -d "${files[@]}" \
     || err "Formatting differs. Fix with: shfmt $(join_spaces "${SHFMT_FLAGS[@]}") -w <files>"
@@ -101,14 +105,26 @@ main() {
   ok "formatting matches shfmt $(join_spaces "${SHFMT_FLAGS[@]}")"
 
   # shellcheck disable=SC2312 # exit status of this substitution is intentionally unused here
-  info "2/3 shellcheck $(join_spaces "${SHELLCHECK_FLAGS[@]}")"
+  info "2/4 shellcheck $(join_spaces "${SHELLCHECK_FLAGS[@]}")"
   shellcheck "${SHELLCHECK_FLAGS[@]}" "${files[@]}" \
     || err "ShellCheck reported findings (suppress only per-line, with a reason)"
   ok "shellcheck clean"
 
-  info "3/3 bats ${UNIT_TEST_DIR}"
+  info "3/4 bats ${UNIT_TEST_DIR}"
   bats "${UNIT_TEST_DIR}" || err "Unit tests failed"
   ok "unit tests passed"
+
+  info "4/4 ruff ${PYTHON_DIR}/, pytest ${PDFPREP_TEST_DIR}"
+  uvx ruff format --check "${PYTHON_DIR}" "${PDFPREP_TEST_DIR}" \
+    || err "Python formatting differs. Fix with: uvx ruff format <files>"
+  uvx ruff check "${PYTHON_DIR}" "${PDFPREP_TEST_DIR}" || err "Ruff reported findings"
+  # A venv of its own: the launcher keeps .venv on the GPU torch build, and a plain
+  # `uv run` would re-sync it to the CPU one. --locked fails on a stale uv.lock.
+  UV_PROJECT_ENVIRONMENT="${repo_root}/${PDFPREP_DIR}/.venv-test" \
+    uv run --quiet --locked --project "${PDFPREP_DIR}" --with pytest \
+    pytest -q -p no:cacheprovider "${PDFPREP_TEST_DIR}" \
+    || err "pdf-prep tests failed"
+  ok "python checks passed"
 
   ok "All checks passed"
 }

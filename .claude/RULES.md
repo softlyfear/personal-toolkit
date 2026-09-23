@@ -110,7 +110,7 @@ What is kept from the original structure rule:
 
 The root contains the scripts that are actually delivered to a target machine, plus
 documentation and the tool dotfiles that must live there (`.shellcheckrc`, `.editorconfig`,
-`.gitattributes`). Development and test tooling goes under `.claude/` — the quality gate is
+`.gitattributes`, `.mcp.json`, `.github/workflows/`). Development and test tooling goes under `.claude/` — the quality gate is
 `.claude/lint.sh`, the tests are in `.claude/testing/`. Do not add a `scripts/`, `test/`, or
 similar tooling directory to the root.
 
@@ -122,6 +122,7 @@ root. Every test in this project goes under one root:
 ```
 .claude/testing/
 ├── unit/               bats-core unit tests + vendored test_helper/
+├── pdf-prep/           pytest suite for cli/pdf-prep (Python, run by lint.sh's last stage)
 ├── own-script/         Docker scenarios for configuring_server.sh
 ├── devsetup/           Docker scenarios for install-dev-tools.sh
 ├── svcctl/             Docker scenarios for service-manager.sh + install_svcctl.sh

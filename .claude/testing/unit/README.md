@@ -30,6 +30,7 @@ External commands are shadowed by functions inside the test rather than mocked o
 | `installers.bats` | `install_svcctl.sh`, `install_sysupdate.sh` — UI helpers, checksum-pin shape, base URL |
 | `install_dev_tools.bats` | `install-dev-tools.sh` — usage, `need_cmd`, tool list ↔ installer function consistency |
 | `xrdp.bats` | `add_xfce_xrdp.sh`, `add_gnome_xrdp.sh` — UI helpers, `setup_sudo` privilege selection, dpkg-lock wait, RDP port and PAM constants |
+| `guard.bats` | `.claude/hooks/guard.sh` — destructive-git and `git commit` detection, protected configs, hook JSON in and out |
 
 Functions that mutate the system (apt, systemctl, ufw, userdel, sshd config) are intentionally absent here —
 a unit test asserting against a mocked `systemctl` proves only that the mock was called. Those live in the

@@ -1,0 +1,2 @@
+# the tests follow pdf-prep's own style: one config, no second copy
+extend = "../../../cli/pdf-prep/pyproject.toml"
