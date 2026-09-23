@@ -257,9 +257,11 @@ Two things that are easy to get wrong and are already documented in `.claude/RUL
 
 ### Library docs: Context7
 
-`.mcp.json` registers the Context7 MCP server (`https://mcp.context7.com/mcp`). It runs without a key;
-a free key from context7.com/dashboard only raises the rate limit, and must never be committed; `.claude/settings.json` enables it and allows its tools without a
-prompt. Query it before relying on memory for a third-party API whose behaviour changes between
+Context7 comes from the user's claude.ai connector (`claude.ai Context7`), not from a repo
+`.mcp.json`: a project server with the same URL makes Claude Code suppress the connector, so don't
+add one back. Every other claude.ai connector is switched off for this project (`/mcp`, stored as
+`disabledMcpServers` in `~/.claude.json`); `.claude/settings.json` allows `mcp__claude_ai_Context7`
+without a prompt. Query it before relying on memory for a third-party API whose behaviour changes between
 releases — PyMuPDF, pikepdf, EasyOCR, torch, uv's `pyproject` settings — and whenever a version
 bump is on the table.
 
@@ -281,8 +283,7 @@ effects out of file scope — that includes trap registration (`configuring_serv
 
 The root holds what actually gets delivered (`server-scripts/`, `dev-tools/`, `web3/`), the docs,
 and the tool dotfiles that must sit there (`.shellcheckrc`, `.editorconfig`, `.gitattributes`,
-`.mcp.json` — Claude Code reads project MCP servers from the root only — and `.github/workflows/`,
-the only place GitHub reads workflows from).
+and `.github/workflows/`, the only place GitHub reads workflows from).
 Everything else Claude Code needs goes under `.claude/`: the gate is `.claude/lint.sh`, the tests
 are `.claude/testing/`. **Don't add `scripts/`, `test/`, or any other tooling directory to the
 root** — this has already been corrected once.

@@ -28,12 +28,9 @@
       "Bash(grep:*)",
       "Bash(rm:*)",
       "Bash(sudo:*)",
-      "mcp__context7"
+      "mcp__claude_ai_Context7"
     ]
   },
-  "enabledMcpjsonServers": [
-    "context7"
-  ],
   "hooks": {
     "PreToolUse": [
       {
