@@ -27,7 +27,11 @@
       "Bash(cat:*)",
       "Bash(grep:*)",
       "Bash(rm:*)",
-      "Bash(sudo:*)"
+      "Bash(sudo:*)",
+      "mcp__context7"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "context7"
+  ]
 }

@@ -243,6 +243,14 @@ Two things that are easy to get wrong and are already documented in `.claude/RUL
   from bats leaks its `IFS` into the runner and makes failing tests vanish from the report —
   `.claude/testing/unit/helper.bash` restores the default.
 
+### Library docs: Context7
+
+`.mcp.json` registers the Context7 MCP server (`https://mcp.context7.com/mcp`). It runs without a key;
+a free key from context7.com/dashboard only raises the rate limit, and must never be committed; `.claude/settings.json` enables it and allows its tools without a
+prompt. Query it before relying on memory for a third-party API whose behaviour changes between
+releases — PyMuPDF, pikepdf, EasyOCR, torch, uv's `pyproject` settings — and whenever a version
+bump is on the table.
+
 ### Main-guard: every shipped script is sourceable
 
 Each script in `server-scripts/`/`dev-tools/` ends with
@@ -260,7 +268,8 @@ effects out of file scope — that includes trap registration (`configuring_serv
 ### Repo root is for shipped scripts only; tooling lives under `.claude/`
 
 The root holds what actually gets delivered (`server-scripts/`, `dev-tools/`, `web3/`), the docs,
-and the tool dotfiles that must sit there (`.shellcheckrc`, `.editorconfig`, `.gitattributes`).
+and the tool dotfiles that must sit there (`.shellcheckrc`, `.editorconfig`, `.gitattributes`,
+`.mcp.json` — Claude Code reads project MCP servers from the root only).
 Everything else Claude Code needs goes under `.claude/`: the gate is `.claude/lint.sh`, the tests
 are `.claude/testing/`. **Don't add `scripts/`, `test/`, or any other tooling directory to the
 root** — this has already been corrected once.
