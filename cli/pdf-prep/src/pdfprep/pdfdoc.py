@@ -22,7 +22,7 @@ ARTIFACT_MARKERS = ("--part_", "--manifest.", "--document", "--translated")
 _LOOKALIKES = str.maketrans("аеорсухтнмвк", "aeopcyxthmbk")
 _FILE_NAME = re.compile(r"^[\w .()-]+\.(pdf|docx?|xlsx?|pptx?|txt)$", re.IGNORECASE)
 _CAPTION = re.compile(r"^(рис|fig|табл|tab)\w*\b", re.IGNORECASE)
-_LEADER = re.compile(r"(\.\s?){4,}")
+_LEADER = re.compile(r"(\.\s?){4,}|_{3,}")
 # A font embedded without a Unicode map extracts as control codes and private-use glyphs
 _UNDECODED = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ue000-\uf8ff\ufffd]")
 UNDECODED_MAX_RATIO = 0.1
@@ -260,17 +260,25 @@ def _opens_lower(text: str) -> bool:
     return next((char.islower() for char in text if char.isalpha()), False)
 
 
-def _page_headings(lines: list[tuple[float, str]], running: set[str], body: float) -> list[str]:
-    """Headings on a page, largest size first; an empty list rather than a guess.
+# "2.1 Title": at most two digits a level, so a year or a quantity never passes for a number
+_NUMBERED_HEADING = re.compile(r"^(?P<number>\d{1,2}(?:\.\d{1,2}){0,3}\.?)\s+[^\W\d_]")
+# more numbered lines than this on one page are a list, a diagram or a contents page
+_NUMBERED_PER_PAGE = 4
+_NUMBERED_MIN_CHAIN = 3
 
-    Size groups are tried top-down while they stand out from the body text, because the
-    largest text on a page is often a figure label or a stray OCR fragment and the real
-    heading sits one size below it. A wrong title in the index misleads more than a
-    missing one, hence every filter here errs towards returning nothing.
-    """
-    # Filtered before grouping: a bullet glyph or a part number set at the heading's size
-    # would otherwise inflate its group into a "paragraph" and hide the heading.
-    lines = [
+
+def _number_depth(number: str) -> int:
+    """ "1.0" is a chapter, "1.1" a level below it."""
+    return max(1, len([part for part in number.split(".") if part.strip("0")]))
+
+
+def _heading_level(title: str) -> int:
+    match = _NUMBERED_HEADING.match(title)
+    return _number_depth(match["number"]) if match else 1
+
+
+def _title_candidates(lines: list[tuple[float, str]], running: set[str]) -> list[tuple[float, str]]:
+    return [
         (size, text)
         for size, text in lines
         if len(text) <= 90
@@ -278,6 +286,103 @@ def _page_headings(lines: list[tuple[float, str]], running: set[str], body: floa
         and not _is_running(text, running)
         and not _never_a_title(text)
     ]
+
+
+def _numbered_candidates(
+    lines: list[tuple[float, str]], running: set[str], body: float
+) -> list[str]:
+    # an author's numbered heading only has to be larger than the body: numbered list items
+    # are set at body size
+    found = [
+        text
+        for size, text in _title_candidates(lines, running)
+        if size > body
+        and _NUMBERED_HEADING.match(text)
+        and _is_title(text)
+        and _reads_as_words(text)
+    ]
+    return found if len(found) <= _NUMBERED_PER_PAGE else []
+
+
+_WORD = re.compile(r"^[^\W\d_]+(?:-[^\W\d_]+)*$")
+
+
+def _reads_as_words(title: str) -> bool:
+    """ "2.1 Maintenance of drives", not a wiring callout like "5 WHBK =COU+010-P4" or "24 V DC":
+    two real words, or one word of four letters or more that is not an all-caps code."""
+    words = [
+        token
+        for token in (raw.strip(".,:;()") for raw in title.split()[1:])
+        if _WORD.match(token) and sum(char.isalpha() for char in token) >= 3
+    ]
+    return len(words) >= 2 or any(len(w) >= 4 and not w.isupper() for w in words)
+
+
+def _number_key(title: str) -> tuple[int, ...]:
+    match = _NUMBERED_HEADING.match(title)
+    return tuple(int(part) for part in match["number"].rstrip(".").split(".")) if match else ()
+
+
+def _numbered_outline(
+    pages: list[list[tuple[float, str]]], running: set[str], body: float
+) -> dict[int, list[str]]:
+    """Numbered headings that form one ascending outline across the document, per page.
+
+    The longest strictly increasing chain of numbers wins: procedure steps restart at "1."
+    and diagram callouts come in any order, so neither survives next to a real outline.
+    """
+    found = [
+        (index, title)
+        for index, lines in enumerate(pages)
+        for title in _numbered_candidates(lines, running, body)
+    ]
+    keys = [_number_key(title) for _, title in found]
+    # patience sorting: tails[k] is the index in `found` ending the best chain of length k+1
+    tails: list[int] = []
+    previous = [-1] * len(found)
+    for position, key in enumerate(keys):
+        low, high = 0, len(tails)
+        while low < high:
+            middle = (low + high) // 2
+            if keys[tails[middle]] < key:
+                low = middle + 1
+            else:
+                high = middle
+        previous[position] = tails[low - 1] if low else -1
+        if low == len(tails):
+            tails.append(position)
+        else:
+            tails[low] = position
+    if len(tails) < _NUMBERED_MIN_CHAIN:
+        return {}
+    outline: dict[int, list[str]] = {}
+    position = tails[-1]
+    while position >= 0:
+        index, title = found[position]
+        outline.setdefault(index, []).insert(0, title)
+        position = previous[position]
+    return outline
+
+
+def _page_headings(
+    lines: list[tuple[float, str]],
+    running: set[str],
+    body: float,
+    numbered: list[str] | None = None,
+) -> list[str]:
+    """Headings on a page, largest size first; an empty list rather than a guess.
+
+    Size groups are tried top-down while they stand out from the body text, because the
+    largest text on a page is often a figure label or a stray OCR fragment and the real
+    heading sits one size below it. A wrong title in the index misleads more than a
+    missing one, hence every filter here errs towards returning nothing.
+    """
+    # "2", "2.1", "2.2" at one size on one page are headings of one outline, not a paragraph
+    if numbered:
+        return numbered
+    # Filtered before grouping: a bullet glyph or a part number set at the heading's size
+    # would otherwise inflate its group into a "paragraph" and hide the heading.
+    lines = _title_candidates(lines, running)
     for size in sorted({size for size, _ in lines}, reverse=True):
         if size < body * 1.15:
             break
@@ -290,6 +395,8 @@ def _page_headings(lines: list[tuple[float, str]], running: set[str], body: floa
             len(at_size) == 2
             and at_size[1] == at_size[0] + 1
             and (_opens_lower(texts[1]) or (texts[0].isupper() and texts[1].isupper()))
+            # "5 MAINTENANCE" / "6 APPENDIX": a numbered line opens its own heading
+            and not _NUMBERED_HEADING.match(texts[1])
         )
         # "HI-" / "SCAN 5180i": a trailing hyphen is a wrap whatever the next line's case
         hyphenated = len(at_size) == 2 and at_size[1] == at_size[0] + 1 and texts[0][-1] == "-"
@@ -323,13 +430,14 @@ def _doc_lines(doc: pymupdf.Document) -> tuple[list[list[tuple[float, str]]], se
 
 def _sections_heuristic(doc: pymupdf.Document) -> list[Section]:
     pages, running, body = _doc_lines(doc)
+    outline = _numbered_outline(pages, running, body)
     out: list[Section] = []
     for index, lines in enumerate(pages):
-        for title in _page_headings(lines, running, body):
+        for title in _page_headings(lines, running, body, outline.get(index)):
             # a heading repeated on the next page continues its section, it does not open one
             if out and _line_key(out[-1].title) == _line_key(title):
                 continue
-            out.append(Section(index, title, 1))
+            out.append(Section(index, title, _heading_level(title)))
     if not out or out[0].page != 0:
         out.insert(0, Section(0, (doc.metadata or {}).get("title") or "Document", 1))
     return out
@@ -418,8 +526,7 @@ def _sections_from_contents(doc: pymupdf.Document) -> list[Section] | None:
     for index in best:
         number, title, page = entries[index]
         if number:
-            # "1.0" is a chapter, "1.1" a level below it
-            numbered_level = max(1, len([part for part in number.split(".") if part.strip("0")]))
+            numbered_level = _number_depth(number)
             level = numbered_level
         else:
             # an unnumbered entry sits under the numbered one before it

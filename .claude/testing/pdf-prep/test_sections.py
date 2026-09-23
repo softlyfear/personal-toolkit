@@ -87,3 +87,49 @@ def test_contents_of_one_volume_in_a_merged_document_are_not_used(make_pdf) -> N
     info = pdfdoc.inspect(contents_pdf(make_pdf, CONTENTS, pages=60))
 
     assert info.toc_source == "heuristic"
+
+
+def test_numbered_headings_just_above_body_size_are_sections(make_pdf) -> None:
+    # 12 pt headings over 11 pt text fall under the size heuristic's 15% margin, and three
+    # headings at one size on one page read as a paragraph to it
+    headings = {
+        0: [("1 Operation", 14), ("1.1 Switching on", 12)],
+        1: [("1.2 Loading trays", 12)],
+        5: [("2 Maintenance", 14), ("2.1 Mechanical parts", 14), ("2.2 Electrical parts", 14)],
+    }
+
+    def fill(page: pymupdf.Page, number: int) -> None:
+        y = 60
+        for text, size in headings.get(number, []):
+            page.insert_text((72, y), text, fontsize=size)
+            y += 24
+        if number == 3:
+            # numbered list items are set at body size
+            page.insert_text((72, y), "1. Check the power supply", fontsize=BODY)
+            page.insert_text((72, y + 16), "2. Replace the fuse", fontsize=BODY)
+        if number == 7:
+            # wiring callouts on a diagram
+            page.insert_text((72, y), "5 WHBK =COU+010-P4", fontsize=12)
+            page.insert_text((72, y + 16), "24 V DC", fontsize=12)
+        body_text(page, top=max(y, 140) + 40)
+
+    info = pdfdoc.inspect(make_pdf("numbered", 8, fill))
+
+    assert info.toc_source == "heuristic"
+    assert [(s.page, s.level, s.title) for s in info.sections] == [
+        (0, 1, "1 Operation"),
+        (0, 2, "1.1 Switching on"),
+        (1, 2, "1.2 Loading trays"),
+        (5, 1, "2 Maintenance"),
+        (5, 2, "2.1 Mechanical parts"),
+        (5, 2, "2.2 Electrical parts"),
+    ]
+
+
+def test_a_numbered_line_is_never_the_wrapped_tail_of_the_one_above() -> None:
+    lines = [(16.0, "5 MAINTENANCE STEPS"), (16.0, "6 APPENDIX")]
+
+    assert pdfdoc._page_headings(lines, set(), 11.0) == ["5 MAINTENANCE STEPS", "6 APPENDIX"]
+    assert pdfdoc._page_headings([(16.0, "HIGH VOLTAGE"), (16.0, "GENERATOR")], set(), 11.0) == [
+        "HIGH VOLTAGE GENERATOR"
+    ]

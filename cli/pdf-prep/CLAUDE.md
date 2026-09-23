@@ -71,7 +71,11 @@ Points that are easy to break:
   pages and two on others. Before the heuristic, a printed contents page (dot leaders) is tried:
   each entry must be found on its page under one printed-to-physical offset (60% or the contents
   are dropped), and contents ending before mid-document are dropped — in a merged manual they
-  index one volume and would swallow the rest into their last section. Bookmarks named after files (`95587112.pdf`, common in merged manuals) take the heading
+  index one volume and would swallow the rest into their last section. Numbered headings ("2.1 …")
+  only need to be larger than the body, not 15% larger, and several may share a page — but only
+  those on the longest ascending chain of numbers across the document count: procedure steps
+  restart at "1." and diagram callouts come in any order. A numbered line is never the wrapped tail
+  of the line above it. Bookmarks named after files (`95587112.pdf`, common in merged manuals) take the heading
   printed on their page. After OCR the section map is rebuilt (`remap_sections`): the one built at
   intake came from a scan with no text.
 - `task/`, `result/`, `.work/` and `config.toml` are gitignored (`.gitkeep` files excepted) — the
