@@ -352,9 +352,19 @@ Points that are easy to break:
   resolves the project directory from `BASH_SOURCE[0]`. It is Bash, so it is inside `.claude/lint.sh`.
   It writes `PDFPREP_HOME` into the generated `~/.local/bin/pdf-prep` launcher; that is what makes
   `task/`/`result/` resolve from any working directory.
-- `torch`/`torchvision` are listed as **direct** dependencies purely so `[tool.uv.sources]` can pin
-  them to the `pytorch-cpu` index. As transitive deps of `easyocr` the pin is ignored and the CUDA
-  wheels land instead: 5.7 GB of venv versus 1.3 GB. Don't "clean up" those two lines.
+- `torch`/`torchvision` live in four mutually exclusive dependency groups (`cpu`, `cuda`,
+  `rocm-linux`, `rocm-windows`), each pinned to its own index in `[tool.uv.sources]`. They are listed
+  at all only because sources apply to **direct** dependencies — as transitive deps of `easyocr` the
+  pin is ignored and PyPI's CUDA wheels land whatever the machine has. `cpu` is the default group, so
+  a bare `uv run` is safe; a GPU build survives only because the launcher that `install.sh` writes passes
+  `--no-default-groups --group <build>` — any `uv run` without those flags re-syncs to `cpu`.
+  `install.sh` picks the build from the hardware and then proves it on the device (conv + LSTM, what
+  EasyOCR is made of), falling back to `cpu`. `rocm-windows` comes from AMD's flat index
+  (`repo.radeon.com`, Python 3.12 only), and its `rocm-sdk-*` deps are listed in the group for the
+  same direct-dependency reason. `ocr.py` picks the device at run time and moves to the CPU on a GPU
+  `RuntimeError` (out of memory, a kernel ROCm lacks). A GPU reader that is already loaded is reused
+  without re-checking free memory: its own allocation reads as "not free" and silently pushed every
+  document after the first onto the CPU.
 - `PYMUPDF_MESSAGE=fd:2` is set in `src/pdfprep/__init__.py` before PyMuPDF loads: MuPDF's notices
   otherwise land on stdout, where the report tables are written.
 - Compression has one mode: a lossless pass, then rasters above `target_dpi` re-encoded at
@@ -369,9 +379,11 @@ Points that are easy to break:
   fields and named destinations (pikepdf says so via `PageCopyWarning`). The matching outline slice
   is re-attached per part with `set_toc`, whose levels must be renormalised — a slice of a larger
   document routinely starts below level 1 or skips a level, and `set_toc` rejects both.
-- `--ocr auto` only fires on a document with *no* text layer. A `Mixed` document whose drawings lack
-  text needs `--ocr always`; that is deliberate, not an oversight — OCR'ing 800 typeset pages to
-  reach 93 drawings is minutes of CPU for nothing.
+- `--ocr always` is the default for `split` and `translate` (user's call, 2026-09-23: one run, no
+  flags). It OCRs only pages without a *readable* text layer — `pdfdoc.text_layer()` also counts a
+  layer of undecoded glyph codes (fonts with no Unicode map, typical of schematics) as unreadable —
+  so typeset pages cost nothing. `auto` still exists for a quick run: only a document with no text
+  at all.
 - LLM providers live in one file with one rule: Claude (`claude-cli`) is the default and needs no
   key; every other backend reads its key from an environment variable only. Resolution order for
   every setting is CLI flag > `PDFPREP_*` env > `config.toml` > built-in default.

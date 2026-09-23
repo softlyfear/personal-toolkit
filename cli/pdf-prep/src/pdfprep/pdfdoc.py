@@ -22,6 +22,9 @@ _LOOKALIKES = str.maketrans("аеорсухтнмвк", "aeopcyxthmbk")
 _FILE_NAME = re.compile(r"^[\w .()-]+\.(pdf|docx?|xlsx?|pptx?|txt)$", re.IGNORECASE)
 _CAPTION = re.compile(r"^(рис|fig|табл|tab)\w*\b", re.IGNORECASE)
 _LEADER = re.compile(r"(\.\s?){4,}")
+# A font embedded without a Unicode map extracts as control codes and private-use glyphs
+_UNDECODED = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ue000-\uf8ff\ufffd]")
+UNDECODED_MAX_RATIO = 0.1
 
 _CYRILLIC = {
     "а": "a",
@@ -67,6 +70,29 @@ def slugify(text: str, limit: int = 40) -> str:
     return (cleaned[:limit].rstrip("-")) or "untitled"
 
 
+def unique_slugs(paths: list[Path], root: Path) -> dict[Path, str]:
+    """Slug per source. result/ is flat and every output name starts with the slug, so two
+    `manual.pdf` in different folders would overwrite each other's parts — and a re-run's
+    cleanup would delete the other's. Clashing names take their folder path into the slug."""
+    by_stem: dict[str, list[Path]] = {}
+    for path in paths:
+        by_stem.setdefault(slugify(path.stem), []).append(path)
+    slugs: dict[Path, str] = {}
+    used: set[str] = set()
+    for stem_slug, group in by_stem.items():
+        for path in group:
+            if len(group) == 1:
+                slug = stem_slug
+            else:
+                slug = slugify(str(path.relative_to(root).with_suffix("")), limit=60)
+            base, suffix = slug, 2
+            while slug in used:
+                slug, suffix = f"{base}-{suffix}", suffix + 1
+            used.add(slug)
+            slugs[path] = slug
+    return slugs
+
+
 def is_artifact(path: Path) -> bool:
     name = path.name
     return any(marker in name for marker in ARTIFACT_MARKERS)
@@ -107,6 +133,18 @@ class DocInfo:
     sections: list[Section]
     toc_source: str  # toc_json | bookmarks | heuristic
     renamed_sections: int = 0  # bookmarks named after files, replaced with the page heading
+    undecoded_pages: tuple[int, ...] = ()  # 0-based; a text layer that is not readable text
+
+
+def text_layer(page: pymupdf.Page) -> str:
+    """ "readable" when the page carries text, "undecoded" when it carries only glyph codes
+    (as unreadable as a scan, and it needs OCR just the same), else "none"."""
+    text = "".join(page.get_text("text").split())
+    if len(text) < TEXT_PAGE_MIN_CHARS:
+        return "none"
+    if len(_UNDECODED.findall(text)) / len(text) >= UNDECODED_MAX_RATIO:
+        return "undecoded"
+    return "readable"
 
 
 def open_doc(path: Path) -> pymupdf.Document:
@@ -238,7 +276,11 @@ def _page_headings(lines: list[tuple[float, str]], running: set[str], body: floa
             and at_size[1] == at_size[0] + 1
             and (_opens_lower(texts[1]) or (texts[0].isupper() and texts[1].isupper()))
         )
-        if wraps:
+        # "HI-" / "SCAN 5180i": a trailing hyphen is a wrap whatever the next line's case
+        hyphenated = len(at_size) == 2 and at_size[1] == at_size[0] + 1 and texts[0][-1] == "-"
+        if hyphenated:
+            texts = ["".join(texts)]
+        elif wraps:
             texts = [" ".join(texts)]
         titles = [text.rstrip(" -–—") for text in texts if _is_title(text)]
         if titles:
@@ -309,14 +351,18 @@ def section_map(
     return _sections_heuristic(doc), "heuristic"
 
 
-def classify(doc: pymupdf.Document) -> tuple[str, bool, bool, int]:
+def classify(doc: pymupdf.Document) -> tuple[str, bool, bool, int, tuple[int, ...]]:
     text_pages = 0
+    undecoded: list[int] = []
     has_images = False
     has_tables = False
     for page in doc:
-        # Same threshold as ocr.pages_without_text, so classification and OCR agree on a page
-        if len(page.get_text("text").strip()) >= TEXT_PAGE_MIN_CHARS:
+        # Same test as ocr.pages_without_text, so classification and OCR agree on a page
+        layer = text_layer(page)
+        if layer == "readable":
             text_pages += 1
+        elif layer == "undecoded":
+            undecoded.append(page.number)
         if not has_images and page.get_images(full=True):
             has_images = True
         if not has_tables:
@@ -332,7 +378,7 @@ def classify(doc: pymupdf.Document) -> tuple[str, bool, bool, int]:
         kind = "TextBased" if not has_images else "Mixed"
     else:
         kind = "Mixed"
-    return kind, has_tables, has_images, text_pages
+    return kind, has_tables, has_images, text_pages, tuple(undecoded)
 
 
 def _mapped_sections(
@@ -361,7 +407,7 @@ def remap_sections(info: DocInfo, text_copy: Path) -> DocInfo:
 def inspect(path: Path, toc_json: Path | None = None) -> DocInfo:
     doc = open_doc(path)
     try:
-        kind, has_tables, has_images, text_pages = classify(doc)
+        kind, has_tables, has_images, text_pages, undecoded = classify(doc)
         sections, toc_source, renamed = _mapped_sections(doc, path, toc_json)
         return DocInfo(
             path=path,
@@ -375,6 +421,7 @@ def inspect(path: Path, toc_json: Path | None = None) -> DocInfo:
             sections=sections,
             toc_source=toc_source,
             renamed_sections=renamed,
+            undecoded_pages=undecoded,
         )
     finally:
         doc.close()
@@ -383,44 +430,76 @@ def inspect(path: Path, toc_json: Path | None = None) -> DocInfo:
 _LIST_MARKER = re.compile(r"^\s*([-•*‣◦]|\(?\d{1,3}[.)]|[a-z][.)])\s+")
 
 
+def _placed_lines(page: pymupdf.Page) -> list[tuple[float, float, str]]:
+    """(top, bottom, text) per line, top to bottom."""
+    lines = []
+    for block in page.get_text("dict").get("blocks", []):
+        for line in block.get("lines", []):
+            text = " ".join("".join(s.get("text", "") for s in line.get("spans", [])).split())
+            if text:
+                lines.append((line["bbox"][1], line["bbox"][3], text))
+    return sorted(lines)
+
+
 def continuation_pages(doc: pymupdf.Document) -> set[int]:
     """0-based pages that continue a protected block from the previous page.
 
     Cutting immediately before such a page would split a table, a list or a figure from
-    its caption, so these page indexes are not allowed cut points.
+    its caption, so these page indexes are not allowed cut points. Running headers and
+    footers are left out of every test: they sit at the edge of each page, so counting them
+    made a third of all pages look like continuations and blocked real section starts.
     """
+    placed = [_placed_lines(page) for page in doc]
+    running = _running_keys([[(0.0, text) for _, _, text in lines] for lines in placed])
     bottom_table: list[bool] = []
     top_table: list[bool] = []
     bottom_image: list[bool] = []
     first_line: list[str] = []
     last_line: list[str] = []
 
-    for page in doc:
-        height = page.rect.height or 1.0
+    for page, lines in zip(doc, placed, strict=True):
+        rect = page.rect
+        height = rect.height or 1.0
+        body = [
+            (top, bottom, text)
+            for top, bottom, text in lines
+            if _line_key(text) not in running and sum(char.isalpha() for char in text) >= 3
+        ]
         tables = []
         try:
             tables = [t.bbox for t in page.find_tables().tables]
         except Exception:  # heuristic detector; an unparsable page simply has no tables
             tables = []
+        # a drawing border is detected as one page-sized table on every sheet
+        tables = [
+            bbox
+            for bbox in tables
+            if not (bbox[2] - bbox[0] >= rect.width * 0.88 and bbox[3] - bbox[1] >= height * 0.88)
+        ]
         bottom_table.append(any(bbox[3] >= height * 0.90 for bbox in tables))
-        top_table.append(any(bbox[1] <= height * 0.18 for bbox in tables))
-        bottom_image.append(
+        # text above the table means the page opens with something else, e.g. a new heading
+        top_table.append(
             any(
-                rect.y1 >= height * 0.80
-                for xref in (image[0] for image in page.get_images(full=True))
-                for rect in page.get_image_rects(xref)
+                bbox[1] <= height * 0.18 and not any(bottom <= bbox[1] for _, bottom, _ in body)
+                for bbox in tables
             )
         )
-        lines = [line for line in page.get_text("text").splitlines() if line.strip()]
-        first_line.append(lines[0] if lines else "")
-        last_line.append(lines[-1] if lines else "")
+        bottom_image.append(
+            any(
+                box.y1 >= height * 0.80
+                for xref in (image[0] for image in page.get_images(full=True))
+                for box in page.get_image_rects(xref)
+            )
+        )
+        first_line.append(body[0][2] if body else "")
+        last_line.append(body[-1][2] if body else "")
 
     continues: set[int] = set()
     for index in range(1, doc.page_count):
         if bottom_table[index - 1] and top_table[index]:
             continues.add(index)
             continue
-        if bottom_image[index - 1] and first_line[index] and len(first_line[index]) < 140:
+        if bottom_image[index - 1] and _CAPTION.match(first_line[index]):
             continues.add(index)
             continue
         if _LIST_MARKER.match(first_line[index]) and _LIST_MARKER.match(last_line[index - 1]):

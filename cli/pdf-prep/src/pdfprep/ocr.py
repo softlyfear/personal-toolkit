@@ -7,26 +7,58 @@ from pathlib import Path
 import pymupdf
 
 from pdfprep.fonts import find_font
-from pdfprep.pdfdoc import TEXT_PAGE_MIN_CHARS
+from pdfprep.pdfdoc import text_layer
 from pdfprep.ui import PdfPrepError, info, warn
 
 RENDER_DPI = 200
 ENGINE = "easyocr"
 MIN_CONFIDENCE = 0.2
-# Building a Reader costs seconds and hundreds of MB, so one is kept per language set
-_READERS: dict[tuple[str, ...], object] = {}
+# Detector plus recogniser, with headroom for a large page render
+GPU_MIN_FREE_BYTES = 2 * 1024**3
+# Building a Reader costs seconds and hundreds of MB, so one is kept per language set and device
+_READERS: dict[tuple[tuple[str, ...], bool], object] = {}
 
 
 def pages_without_text(doc: pymupdf.Document) -> list[int]:
-    return [
-        i
-        for i in range(doc.page_count)
-        if len(doc[i].get_text("text").strip()) < TEXT_PAGE_MIN_CHARS
-    ]
+    return [i for i in range(doc.page_count) if text_layer(doc[i]) != "readable"]
 
 
-def _reader(languages: tuple[str, ...], model_dir: Path):
-    cached = _READERS.get(languages)
+def gpu_status() -> tuple[bool, str]:
+    """(usable, description) of the GPU as torch sees it. A ROCm build of torch answers
+    through torch.cuda as well, so one check covers NVIDIA and AMD."""
+    try:
+        import torch
+    except ImportError:
+        return False, "torch is not installed"
+    if not torch.cuda.is_available():
+        return False, f"no GPU visible to torch {torch.__version__}"
+    free, total = torch.cuda.mem_get_info()
+    detail = (
+        f"{torch.cuda.get_device_name(0)} · {free / 1024**3:.1f} of {total / 1024**3:.1f} GB free"
+        f" · torch {torch.__version__}"
+    )
+    if free < GPU_MIN_FREE_BYTES:
+        return False, f"{detail} — too little free memory"
+    return True, detail
+
+
+def _use_gpu(device: str, languages: tuple[str, ...]) -> bool:
+    if device == "cpu":
+        return False
+    # the memory a loaded GPU reader holds reads as "not free" and would push every document
+    # after the first onto the CPU
+    if (languages, True) in _READERS:
+        return True
+    usable, detail = gpu_status()
+    if usable:
+        info(f"OCR on the GPU: {detail}")
+    elif device == "gpu":
+        warn(f"OCR falls back to the CPU: {detail}")
+    return usable
+
+
+def _reader(languages: tuple[str, ...], model_dir: Path, gpu: bool):
+    cached = _READERS.get((languages, gpu))
     if cached is not None:
         return cached
     try:
@@ -35,18 +67,18 @@ def _reader(languages: tuple[str, ...], model_dir: Path):
         raise PdfPrepError("easyocr is not installed — run `uv sync` in the project") from exc
     model_dir.mkdir(parents=True, exist_ok=True)
     info(f"Loading EasyOCR ({', '.join(languages)}) — first run downloads model weights")
-    _READERS[languages] = easyocr.Reader(
+    _READERS[(languages, gpu)] = easyocr.Reader(
         list(languages),
-        gpu=False,
+        gpu=gpu,
         model_storage_directory=str(model_dir),
         user_network_directory=str(model_dir),
         verbose=False,
     )
-    return _READERS[languages]
+    return _READERS[(languages, gpu)]
 
 
 def add_text_layer(
-    source: Path, dst: Path, languages: tuple[str, ...], work_dir: Path
+    source: Path, dst: Path, languages: tuple[str, ...], work_dir: Path, device: str = "auto"
 ) -> tuple[int, str]:
     """Write an OCR'd copy of `source` to `dst`. Returns (pages that gained text, engine)."""
     # Imported here so `split`/`compress` never pay for loading numpy
@@ -64,7 +96,8 @@ def add_text_layer(
         if not targets:
             doc.save(dst)
             return 0, ENGINE
-        reader = _reader(languages, work_dir / "ocr-models")
+        gpu = _use_gpu(device, languages)
+        reader = _reader(languages, work_dir / "ocr-models", gpu)
         scale = RENDER_DPI / 72.0
         words = 0
         pages_with_text = 0
@@ -74,8 +107,18 @@ def add_text_layer(
             image = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
                 pixmap.height, pixmap.width, 3
             )
+            try:
+                found = reader.readtext(image)
+            # torch.OutOfMemoryError and a kernel the ROCm build lacks both land here
+            except RuntimeError as exc:
+                if not gpu:
+                    raise
+                warn(f"OCR on the GPU failed on page {index + 1} ({exc}); continuing on the CPU")
+                gpu = False
+                reader = _reader(languages, work_dir / "ocr-models", gpu)
+                found = reader.readtext(image)
             font_ready = False
-            for box, text, confidence in reader.readtext(image):
+            for box, text, confidence in found:
                 if not text.strip() or confidence < MIN_CONFIDENCE:
                     continue
                 # Embedded lazily: a blank separator page gains no word and needs no font
