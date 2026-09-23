@@ -506,31 +506,66 @@ _CONTENTS_ENTRY = re.compile(r"^(?P<title>.*?\S)\s*(?:\.\s?){3,}\s*(?P<page>\d{1
 _SECTION_NUMBER = re.compile(r"^\d+(?:\.\d+)*\.?$")
 
 
+# a line ending in one of these words ("PROCEDURE OF THE") visibly continues on the next
+_CONNECTIVES = frozenset(
+    {"a", "an", "and", "at", "by", "for", "from", "in", "of", "on", "or", "the", "to", "with"}
+    | {"в", "во", "и", "или", "к", "на", "о", "об", "от", "по", "при", "с", "со", "для", "из"}
+)
+
+
+def _wrapped_head(head: list[str], tail: str, numbered: bool) -> bool:
+    """Whether `head` lines and the leader-carrying `tail` are one wrapped entry."""
+    if not head or _SECTION_NUMBER.match(tail.split()[0]):
+        return False
+    if _opens_lower(tail):
+        return True
+    # a capitalised tail may just as well be the next entry, or a running header sits in
+    # `head`; only a numbered entry whose head visibly continues is joined
+    last = head[-1]
+    continues = (
+        (all(line.isupper() for line in head) and tail.isupper())
+        or last.endswith("-")
+        or last.split()[-1].lower() in _CONNECTIVES
+    )
+    return numbered and continues
+
+
 def _contents_entries(doc: pymupdf.Document) -> list[tuple[str, str, int]]:
     """(number, title, printed page) from a printed table of contents with dot leaders.
 
     The number often sits on a line of its own ("1.0" / "Introduction .... 12"), and a long
-    entry wraps: its tail carries the leader and the page, its head is the line before.
+    entry wraps over up to three lines before the one that carries the leader and the page
+    ("3.1" / "PRELIMINARY LAYOUT INSPECTION" / "AND POSITIONING .... 11").
     """
     entries: list[tuple[str, str, int]] = []
     for page in doc.pages(0, min(doc.page_count, 20)):
-        previous = ""
+        number_line = ""
+        head: list[str] = []
         for raw in page.get_text("text").splitlines():
             line = " ".join(raw.split())
+            if not line:
+                continue
             match = _CONTENTS_ENTRY.match(line)
-            if match:
-                title = match["title"]
-                wrapped = previous and not _CONTENTS_ENTRY.match(previous) and _opens_lower(title)
-                if wrapped and not _SECTION_NUMBER.match(previous):
-                    title, previous = f"{previous} {title}", ""
-                number = previous if _SECTION_NUMBER.match(previous) else ""
-                head, _, rest = title.partition(" ")
-                if not number and _SECTION_NUMBER.match(head) and rest:
-                    number, title = head, rest
-                if not _CAPTION.match(title) and sum(char.isalpha() for char in title) >= 3:
-                    entries.append((number, title, int(match["page"])))
-            if line:
-                previous = line
+            if not match:
+                if _SECTION_NUMBER.match(line):
+                    number_line, head = line, []
+                else:
+                    head = [*head, line][-3:]
+                continue
+            title = match["title"]
+            number = ""
+            if _wrapped_head(head, title, bool(number_line)):
+                # "PANEL-" / "SHAPE VERSION" is one word broken at its hyphen
+                title = "".join(part if part.endswith("-") else f"{part} " for part in head) + title
+                number = number_line
+            elif not head:
+                number = number_line
+            first, _, rest = title.partition(" ")
+            if not number and _SECTION_NUMBER.match(first) and rest:
+                number, title = first, rest
+            if not _CAPTION.match(title) and sum(char.isalpha() for char in title) >= 3:
+                entries.append((number, title, int(match["page"])))
+            number_line, head = "", []
     return entries
 
 

@@ -80,7 +80,11 @@ Points that are easy to break:
   does not count), under the same 60% / second-half bars. The pages before the first section are
   named after the cover's largest heading, measured against the cover's own body size — measured
   across several pages, a company name or logo wins. Letter-spaced text ("C O N T E N T S") is
-  rejoined from glyph positions, the only place its word breaks survive. Bookmarks named after files (`95587112.pdf`, common in merged manuals) take the heading
+  rejoined from glyph positions, the only place its word breaks survive. A contents entry may wrap
+  over up to three lines before the one carrying the leader; a lower-case tail always joins, a
+  capitalised one only under a number line and when the head visibly continues (all caps on both
+  sides, a trailing hyphen, a trailing "of the"/"и"). Anything looser glued the page number and
+  running header above a contents page onto its first entry. Bookmarks named after files (`95587112.pdf`, common in merged manuals) take the heading
   printed on their page. After OCR the section map is rebuilt (`remap_sections`): the one built at
   intake came from a scan with no text.
 - `task/`, `result/`, `.work/` and `config.toml` are gitignored (`.gitkeep` files excepted) — the
