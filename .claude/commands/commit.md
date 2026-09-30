@@ -52,7 +52,7 @@ If the conversation gives no signal either way (e.g. this is the first message o
 Only needed when the level from Step 2 is `assisted` or `full`:
 
 - If the conversation names a specific tool/model (e.g. "Cursor with Grok 4.5", "GPT-5"), use exactly that string, e.g. `AI (Cursor Grok 4.5)`.
-- If no other tool was named and the code was produced by Claude in this session, use `AI (Claude <model name as known in this session>)`. Do not guess a version string Claude is not actually certain of — if uncertain, use `AI (Claude Code)` as a safe generic fallback.
+- If no other tool was named and the code was produced by Claude in this session, use the model and version that wrote it, e.g. `AI (Claude Opus 5.5)`. If the conversation does not show which model and version that was, ask the user one short question instead of dropping the version.
 - If AI involvement is clear but the specific tool/model is genuinely ambiguous (e.g. multiple tools mentioned, unclear which touched this diff), stop and ask the user one short clarifying question before proposing any messages — do not silently pick one.
 
 ## Step 4 — Draft 3 distinct message options
@@ -65,8 +65,9 @@ All 3 options must be valid Conventional Commits, differ meaningfully from each 
 
 Never put an email address in any of the 3 options: no `Co-Authored-By: … <noreply@anthropic.com>`
 and no address for any other model or tool. When Claude wrote the code, every option names the model
-with its exact version — `Co-Authored-By: Claude Opus 5.5` (no `<…>` part) and/or a `… by Opus 5.5`
-subject suffix; a version-less `by Claude` or `by Sonnet` is not enough.
+that wrote it with its exact version — the model of the session that produced the diff, not the one
+running this command — as `Co-Authored-By: Claude <Model> <version>` (no `<…>` part) and/or a
+`… by <Model> <version>` subject suffix; a version-less `by Claude` or `by Sonnet` is not enough.
 
 - **`none`** — plain subject only. Example: `feat: add install-dev-tools.sh`
 - **`assisted`** — plain subject, blank line, then a trailer:

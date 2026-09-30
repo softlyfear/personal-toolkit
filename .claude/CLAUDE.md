@@ -5,12 +5,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this repo is
 
 A collection of standalone Bash scripts for provisioning/hardening Ubuntu servers and setting up dev
-environments. There is no build system, package manager, or test suite — each script is a self-contained CLI
-tool meant to be run directly, often via `bash <(wget -qO- <raw-github-url>)` without cloning the repo first.
+environments. The shipped scripts have no build step — each is a self-contained CLI tool meant to be run
+directly, often via `bash <(wget -qO- <raw-github-url>)` without cloning the repo first. Tooling and tests
+live under `.claude/` (see "Quality gate" below).
 
 ## OS scope: Ubuntu (latest LTS) only
 
-This repo targets the current Ubuntu LTS release only (24.04/26.04 as of this writing) — never pin that
+This repo targets the current Ubuntu LTS release only — never pin that
 version number in code, comments, or docs; say "Ubuntu (latest LTS)" instead, so nothing needs updating at
 the next LTS bump. Ubuntu is the only supported target — no other distribution or derivative is in scope for
 code, tests, docs or review, and none should be added back. Where a script needs to check the running distro,
@@ -41,13 +42,12 @@ read, review, or modify it unless the user explicitly names a file in it.
 This repository has exactly one branch and keeps it that way. **Never create a branch** — no
 feature, fix, or "safety" branch before committing, and no worktree. Commit straight to `main`.
 This overrides the usual "branch first when on the default branch" default: the user works alone
-here, reviews the diff before it lands, and finds extra branches pure overhead. Stated on
-2026-08-23 after a `chore/` branch was created unasked.
+here, reviews the diff before it lands, and finds extra branches pure overhead.
 
 **One finished task, one commit, then push.** `git add`/`commit`/`push` are in the `allow` list of
 `.claude/settings.json`, so no prompt stands in the way. Commit when a substantial task is complete
 or when the user says so — never intermediate or fix-up commits in between. Subject: short, clear
-Conventional Commits line. Stated on 2026-09-22.
+Conventional Commits line.
 
 ### AI attribution: name the model and version, never an email address
 
@@ -61,18 +61,13 @@ here** — no `<noreply@anthropic.com>`, and no equivalent for any other model o
 (`<noreply@openai.com>`, a Cursor/Copilot address, an invented one). The problem is the address
 only, not the trailer. When Claude Code's attribution reminder asks for
 `Co-Authored-By: Claude … <noreply@anthropic.com>`, write that trailer without the `<…>` part.
-Stated on 2026-09-22, corrected on 2026-09-23 (an earlier reading banned the trailer itself); on
-2026-09-23 the addresses were also stripped from the whole published history.
 
 ## Language convention
 
 Everything inside this repository — code comments, commit-visible docs like this file, script output/error
-strings, `.claude/commands/*.md` — is English. This includes the risk/rollback warning line (see below): it
-used to be a Russian "⚠️ РИСК: ... Откат: ..." phrasing, now it's English. The one exception is
-`.claude/output-styles/senior_linux.md`: only its embedded risk-line *template* was updated to English (since
-that template gets written into delivered code); the rest of that file governs chat-response formatting and
-stays Russian, since Claude's chat replies to the user in this project are in Russian regardless of the
-repository's own code-language convention.
+strings, `.claude/commands/*.md`, `.claude/output-styles/*.md` — is English, including the risk/rollback
+warning line (see below). Claude's chat replies to the user are in Russian regardless; the output style says
+so itself, and its Russian mode and section names are literals of that chat format.
 
 ## Critical constraint: scripts are curl/wget-piped, not cloned
 
@@ -102,9 +97,7 @@ Every script in `server-scripts/` and `dev-tools/` follows the same shape — ma
 - Root/sudo detection pattern: `if [[ "$(id -u)" -ne 0 ]]; then SUDO="sudo"; fi`, then prefix privileged
   commands with `$SUDO`.
 - Before any irreversible/disruptive action (service restarts that drop sessions, firewall changes),
-  print a risk/rollback warning to stderr. Existing warnings use this exact pattern — keep it (English
-  only as of the repo-wide English convention below; older revisions of this repo used a Russian
-  "⚠️ РИСК: ... Откат: ..." phrasing for this line — don't reintroduce it):
+  print a risk/rollback warning to stderr in this exact pattern (English, per "Language convention"):
   ```
   ⚠️ RISK: <what could break>. Rollback: <how to recover>.
   ```
@@ -193,7 +186,7 @@ points to preserve when modifying it:
 - `verify_ssh_port_available`, `verify_sshd_port`, and `verify_ssh_ipv4_only` re-check the *effective* runtime
   config via `sshd -T` after writing config, rather than trusting the written file — don't replace these with
   static file checks.
-- All inline comments in this file are in English (see "Language convention" below) — e.g. the rationale for
+- All inline comments in this file are in English (see "Language convention" above) — e.g. the rationale for
   the `00-hardening.conf` drop-in ordering. Don't reintroduce Russian comments here.
 
 ## `dev-tools/`

@@ -31,7 +31,8 @@ DEFAULT_MODEL = {
     OPENAI_COMPATIBLE: "gpt-4.1",
 }
 
-DEFAULT_MAX_TOKENS = 8000
+# Thinking is on by default for claude-sonnet-5 and spends this budget alongside the reply
+DEFAULT_MAX_TOKENS = 16000
 DEFAULT_TIMEOUT_S = 600
 DEFAULT_CHUNK_CHARS = 6000
 

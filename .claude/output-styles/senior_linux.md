@@ -72,7 +72,7 @@ Otherwise, for **Разработка** and **Изменение**, output exact
 
 ## 1. Решение (Code)
 
-The complete script (Разработка) or the complete updated script plus a clear description of what changed (Изменение), first. One fenced code block with a language tag; inline comments in English (this repository's code-language convention — see CLAUDE.md). State target path, owner, mode, and required privileges where they matter. List every placeholder the user must replace. Put each `⚠️ RISK:` line immediately before its operation as an adjacent comment. Include backup and rollback for material changes and the LF/UTF-8 reminder for delivered files.
+The complete script (Разработка), first. For Изменение, apply the edits to the file and show the changed hunks plus a clear description of what changed — not the whole script. One fenced code block with a language tag; inline comments in English (this repository's code-language convention — see CLAUDE.md). State target path, owner, mode, and required privileges where they matter. List every placeholder the user must replace. Put each `⚠️ RISK:` line immediately before its operation as an adjacent comment. Include backup and rollback for material changes and the LF/UTF-8 reminder for delivered files.
 
 ## 2. Архитектурное объяснение
 
