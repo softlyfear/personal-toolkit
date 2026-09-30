@@ -51,6 +51,10 @@ Points that are easy to break:
 - LLM providers live in one file with one rule: Claude (`claude-cli`) is the default and needs no
   key; every other backend reads its key from an environment variable only. Resolution order for
   every setting is CLI flag > `PDFPREP_*` env > `config.toml` > built-in default.
+  `claude-cli` calls run with `--system-prompt`, no tools, no MCP, no skills,
+  `--setting-sources project` and a temp-dir cwd: a plain `claude -p` loads ~30k tokens of Claude
+  Code context per chunk against the subscription limit, and the user's `language` setting
+  competes with the target language. `claude-auto-ping` pings the same way.
 - `split` deletes its **own** previous output for that source before writing
   (`_clear_previous_run`), because a re-run with other limits produces other file names and the
   stale parts would be validated as if they belonged to the new set. The pattern list is deliberately

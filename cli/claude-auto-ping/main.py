@@ -4,6 +4,7 @@
 import argparse
 import logging
 import subprocess
+import tempfile
 import time
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
@@ -75,8 +76,26 @@ def ping(claude: str, model: str) -> bool:
     started = time.monotonic()
     try:
         proc = subprocess.run(
-            # --no-session-persistence: ping sessions are not saved to ~/.claude and don't pile up
-            [claude, "-p", MESSAGE, "--model", model, "--no-session-persistence"],
+            [
+                claude,
+                "-p",
+                MESSAGE,
+                "--model",
+                model,
+                # Any reply opens the window; without these a ping loads ~30k tokens of
+                # Claude Code prompt, tools, MCP and settings against the limit it guards
+                "--system-prompt",
+                "Reply with one word.",
+                "--tools",
+                "",
+                "--strict-mcp-config",
+                "--disable-slash-commands",
+                "--setting-sources",
+                "project",
+                # ping sessions are not saved to ~/.claude and don't pile up
+                "--no-session-persistence",
+            ],
+            cwd=tempfile.gettempdir(),
             capture_output=True,
             text=True,
             timeout=TIMEOUT_S,
