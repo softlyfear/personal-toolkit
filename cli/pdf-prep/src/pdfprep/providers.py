@@ -16,6 +16,9 @@ from dataclasses import dataclass
 from pdfprep.config import ANTHROPIC_API, CLAUDE_CLI, OPENAI_COMPATIBLE, LlmConfig
 from pdfprep.ui import PdfPrepError
 
+# Resolved to the family's newest model, the way the `claude` CLI treats these aliases
+CLAUDE_FAMILIES = ("opus", "sonnet", "haiku")
+
 
 @dataclass
 class Provider:
@@ -97,9 +100,19 @@ class AnthropicApiProvider(Provider):
             kwargs["base_url"] = self.cfg.base_url
         return Anthropic(**kwargs)
 
+    def _resolve_model(self, client) -> str:
+        if self.model in CLAUDE_FAMILIES:
+            prefix = f"claude-{self.model}-"
+            family = [m for m in client.models.list() if m.id.startswith(prefix)]
+            if not family:
+                raise PdfPrepError(f"No {self.model} model is available to this API key")
+            self.model = max(family, key=lambda m: m.created_at).id
+        return self.model
+
     def complete(self, system: str, user: str) -> str:
-        message = self._client().messages.create(
-            model=self.model,
+        client = self._client()
+        message = client.messages.create(
+            model=self._resolve_model(client),
             max_tokens=self.cfg.max_tokens,
             system=system,
             messages=[{"role": "user", "content": user}],
