@@ -370,7 +370,7 @@ before changing anything there. Its tests are `.claude/testing/pdf-prep/` (pytes
 `web3/cosmos_node_commands.sh` (source-only Cosmos validator helpers) and `web3/geth+beacon.sh` (Sepolia
 geth + Prysm beacon setup) are not currently maintained. **Ignore this directory by default** — don't read,
 review, refactor, or "fix while you're in there" unless the user explicitly asks about a file in `web3/` by
-name. That is a rule about *feature* work: since 2026-08-23 both files are inside `.claude/lint.sh`, pass
+name. That is a rule about *feature* work: both files are inside `.claude/lint.sh`, pass
 `shfmt` and `shellcheck -S style` clean, and any edit here must keep them passing. They have no bats or
 Docker suite, so the gate is the only automated check they get.
 The one exception worth remembering if the user does ask: `web3/geth+beacon.sh` pins
