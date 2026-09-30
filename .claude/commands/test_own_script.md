@@ -72,7 +72,7 @@ Works unchanged on both Windows (Docker Desktop) and native Ubuntu (Docker Engin
 repo from both. `MSYS_NO_PATHCONV=1` only matters under Git Bash (disables its path-mangling of `-v`
 arguments); it's a harmless no-op on native Linux, so don't drop it or make it conditional.
 
-Run it in the background (`run_in_background: true`) — all 22 scenarios run the script to completion, including
+Run it in the background (`run_in_background: true`) — every scenario runs the script to completion, including
 a real `apt-get update/upgrade` in every systemd container, which can take 20-40+ minutes depending on network
 speed (a shared apt cache across scenarios helps a bit but doesn't remove the cost). Don't sleep-poll — wait for
 the background-completion notification.
@@ -124,21 +124,20 @@ without confirmation.
 ## Known limitations (say these out loud, don't stay quiet about them)
 
 - Ubuntu only (`jrei/systemd-ubuntu:latest`) — no other distribution is in scope for this harness.
-- 22 scenarios (`.claude/testing/own-script/scenarios.sh:run_all_scenarios`): 5 on argument parsing (`--help`,
-  invalid port, unknown flag, `--user root`, missing `--password-file`) + 17 end-to-end with a full dialog —
+- Scenarios are listed in `.claude/testing/own-script/scenarios.sh:run_all_scenarios`: argument parsing (`--help`,
+  invalid port, unknown flag, `--user root`, missing `--password-file`) and end-to-end runs with a full dialog —
   both auth modes, auto/manual password, fully interactive input with no presets, port 22 (edge case),
   `ssh-rsa` rejection, inline-pasted private key rejection, provider default user, an existing system account
   (uid<1000) both accepted and declined, username retry after invalid characters, password mismatch retry,
-  foreign UFW rules kept, the confirm window, two rollback paths, an idempotent re-run. Extend by following
-  the `run_heavy_scenario` pattern.
+  foreign UFW rules kept, the confirm window, two rollback paths, a missing sshd privsep directory. Extend by
+  following the `run_heavy_scenario` pattern.
 - The manual-password scenarios assert that a hash was set, not *which* password it hashes — the container has
   no non-interactive way to authenticate as that user.
 - `ufw`/`fail2ban` inside the container are checked for "did the command succeed and what ended up in the
   ruleset", not real traffic filtering from an external host — the container is in its own network namespace,
   nothing leaks out.
 - Comments inside the harness itself (`.claude/testing/own-script/*.sh`, `*.exp`, `images/*.Dockerfile`) are in
-  English, matching the rest of this repository's code-comment convention; this command and chat replies to the
-  user stay in Russian.
+  English, matching the rest of this repository; chat replies to the user stay in Russian.
 
 ## Source attribution
 
