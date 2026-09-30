@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 
 from pdfprep.config import ANTHROPIC_API, CLAUDE_CLI, OPENAI_COMPATIBLE, LlmConfig
@@ -55,14 +56,25 @@ class ClaudeCliProvider(Provider):
             user,
             "--model",
             self.model,
-            "--append-system-prompt",
+            # Replace Claude Code's agent prompt, tools, MCP, skills and user settings: ~30k
+            # tokens of subscription limit per call otherwise, and the user's `language`
+            # setting would compete with the target language
+            "--system-prompt",
             system,
+            "--tools",
+            "",
+            "--strict-mcp-config",
+            "--disable-slash-commands",
+            "--setting-sources",
+            "project",
             # Translation runs hundreds of one-shot calls; persisted sessions would pile up
             "--no-session-persistence",
         ]
         try:
             done = subprocess.run(
                 command,
+                # Keep CLAUDE.md files of the caller's working directory out of the context
+                cwd=tempfile.gettempdir(),
                 capture_output=True,
                 text=True,
                 timeout=self.timeout_s,
