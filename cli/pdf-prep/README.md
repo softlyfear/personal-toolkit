@@ -193,7 +193,7 @@ Only translation calls a model. One rule governs all of them:
 Resolution order for every setting: **CLI flag > `PDFPREP_*` env var > `config.toml` > built-in default**.
 
 ```bash
-pdf-prep translate --lang russian --provider anthropic-api --model claude-sonnet-5
+pdf-prep translate --lang russian --provider anthropic-api --model opus
 PDFPREP_LLM_PROVIDER=openai-compatible pdf-prep translate --lang russian
 ```
 

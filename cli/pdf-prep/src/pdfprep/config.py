@@ -27,11 +27,11 @@ DEFAULT_KEY_ENV = {
 }
 DEFAULT_MODEL = {
     CLAUDE_CLI: "sonnet",
-    ANTHROPIC_API: "claude-sonnet-5",
+    ANTHROPIC_API: "sonnet",
     OPENAI_COMPATIBLE: "gpt-4.1",
 }
 
-# Thinking is on by default for claude-sonnet-5 and spends this budget alongside the reply
+# Thinking is on by default for current Claude models and spends this budget alongside the reply
 DEFAULT_MAX_TOKENS = 16000
 DEFAULT_TIMEOUT_S = 600
 DEFAULT_CHUNK_CHARS = 6000
