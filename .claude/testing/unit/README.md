@@ -86,5 +86,5 @@ bash .claude/lint.sh          # format + lint + unit tests
 bats .claude/testing/unit/    # unit tests only
 ```
 
-Scenario suites are driven from `.claude/` tooling; see `.claude/commands/test_own_script.md` for the exact
+Scenario suites are driven from `.claude/` tooling; see `.claude/skills/docker-suite/` for the exact
 `docker run` invocation.

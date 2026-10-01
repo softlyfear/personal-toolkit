@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # .claude/testing/own-script/run.sh — entry point for the configuring_server.sh test harness.
 # Must run INSIDE the driver container (images/driver.Dockerfile) with /var/run/docker.sock
-# mounted. See .claude/commands/test_own_script.md for the full launch command.
+# mounted. Launched by .claude/skills/docker-suite/scripts/run-suite.sh.
 #
 # HOST_REPO_PATH is required: the repo path AS SEEN BY THE DOCKER DAEMON (normally the same
 # as "$(pwd)" on the host) — NOT a path inside the driver container. Bind mounts for scenario
@@ -10,7 +10,7 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-: "${HOST_REPO_PATH:?HOST_REPO_PATH is not set — run via .claude/commands/test_own_script.md}"
+: "${HOST_REPO_PATH:?HOST_REPO_PATH is not set — run via .claude/skills/docker-suite/scripts/run-suite.sh}"
 
 readonly TESTING_DIR="/work/repo/.claude/testing/own-script" # path inside the driver container
 readonly REPO_MOUNT_SRC="${HOST_REPO_PATH}"                  # path as seen by the daemon
@@ -47,7 +47,7 @@ dump_failed_logs() {
 
 main() {
   sep
-  info "test_own_script: starting run"
+  info "own-script: starting run"
   sep
 
   if ! docker info > /dev/null 2>&1; then
