@@ -44,10 +44,17 @@ feature, fix, or "safety" branch before committing, and no worktree. Commit stra
 This overrides the usual "branch first when on the default branch" default: the user works alone
 here, reviews the diff before it lands, and finds extra branches pure overhead.
 
-**One finished task, one commit, then push.** `git add`/`commit`/`push` are in the `allow` list of
-`.claude/settings.json`, so no prompt stands in the way. Commit when a substantial task is complete
-or when the user says so — never intermediate or fix-up commits in between. Subject: short, clear
+**Autonomous: one finished task, one commit, then push — without asking.** The user has handed
+this over. When a task, or a question whose answer changed files, is closed, Claude runs the gate,
+commits and pushes on its own and reports the commit in the reply. `git add`/`commit`/`push` are in
+the `allow` list of `.claude/settings.json`, so no prompt stands in the way. Never intermediate or
+fix-up commits in between; a failing gate is fixed, never committed around. Subject: short, clear
 Conventional Commits line.
+
+**Decisions are Claude's to make.** Naming, placement, which of several workable options, scope of a
+fix — pick, act, and say in the reply what was chosen and why. Ask only when the choice is the user's
+alone: something the hook guards (destructive git, gate config), an action on a real server, or a
+security trade-off with no safe default.
 
 ### AI attribution: name the model and version, never an email address
 
@@ -65,7 +72,7 @@ only, not the trailer. When Claude Code's attribution reminder asks for
 ## Language convention
 
 Everything inside this repository — code comments, commit-visible docs like this file, script output/error
-strings, `.claude/commands/*.md`, `.claude/output-styles/*.md` — is English, including the risk/rollback
+strings, `.claude/commands/*.md`, `.claude/skills/`, `.claude/output-styles/*.md` — is English, including the risk/rollback
 warning line (see below). Claude's chat replies to the user are in Russian regardless; the output style says
 so itself, and its Russian mode and section names are literals of that chat format.
 
@@ -108,98 +115,18 @@ Every script in `server-scripts/` and `dev-tools/` follows the same shape — ma
   the process — prefer adding a `--*-file PATH` alternative over a raw value flag when introducing new
   secret-accepting options (see `configuring_server.sh --password-file` for the pattern).
 
-## Checksum pinning — update in lockstep
+## Directory notes load on demand
 
-Two installer scripts pin a SHA256 of the script they fetch and install to `/usr/local/bin`:
+Details that matter only inside one directory live in that directory's `CLAUDE.md`, which Claude Code
+loads as soon as a file there is read — keep them there rather than growing this file:
 
-- `server-scripts/install_svcctl.sh` pins the checksum of `server-scripts/service-manager.sh` (installs as
-  `svcctl`)
-- `server-scripts/install_sysupdate.sh` pins the checksum of `server-scripts/update_system_all.sh` (installs
-  as `sysupdate`)
-
-**Any edit to `service-manager.sh` or `update_system_all.sh` requires recomputing and updating
-`EXPECTED_SHA256` in the corresponding `install_*.sh`**, or the installer will fail closed (by design — this
-is a supply-chain integrity check, not a bug). Recompute with:
-
-```bash
-sha256sum server-scripts/service-manager.sh
-sha256sum server-scripts/update_system_all.sh
-```
-
-Both installers also validate `EXPECTED_SHA256` itself against `^[[:xdigit:]]{64}$` before comparing, and run
-`bash -n` on the downloaded script before installing it.
-
-## `configuring_server.sh` — architecture notes
-
-The flagship script: a full VPS hardening flow (`server-scripts/configuring_server.sh`). Key structural
-points to preserve when modifying it:
-
-- **Execution order matters and is documented in the header**: system update → SSH/sudo user hardening → UFW
-  → Fail2Ban → sysctl → journald → cron/at → final cleanup. SSH hardening happens before the firewall is
-  locked down; the new user's key is verified (`verify_ssh_authorized_key`) *before* root login is disabled,
-  so a bad key can't lock the operator out.
-- **Rollback via `trap rollback_on_failure EXIT`**: every risky mutation (sshd config, sudoers, UFW rules,
-  Fail2Ban config, `ssh.socket` mask/disable, `ssh.service` enablement) records enough state (`ROLLBACK_*`
-  globals) to be undone if the
-  script exits before `SCRIPT_SUCCEEDED=true` is set. If you add a new mutating step before that point, add
-  matching rollback state and handle it in `rollback_on_failure()`. **Set the `ROLLBACK_*` flag before the
-  first mutation it guards, not after the last one** — the UFW step used to set `ROLLBACK_UFW_MODIFIED=true`
-  only after `ufw --force enable`, which left the whole block unprotected on failure. UFW is rolled back by
-  restoring `UFW_STATE_FILES` (`user.rules`, `user6.rules`, `ufw.conf`, `/etc/default/ufw`), because
-  `ufw delete` has no inverse.
-- **`ufw_enforce_single_open_port()` asks before touching rules the script did not write.**
-  `ufw_rule_is_ours()` claims only its own `LIMIT` rules on other `N/tcp` ports and the blanket `ALLOW` on
-  `22/tcp` that `add_*_xrdp.sh` leaves; anything else (an operator's 80/443, a bare `80`, udp, ranges,
-  app profiles) needs an explicit yes. This was verified the hard way — the earlier
-  `ufw_prune_stale_ssh_limit_rules()` silently deleted 80/tcp and 443/tcp on a re-run. `UFW_NUMBERED_RULE_RE`
-  parses every rule shape, not only `N/tcp`: the narrower regex let a bare `ufw allow 80` slip past both the
-  prompt and the "only SSH open" summary. The SSH `LIMIT` rule is re-checked after `ufw --force enable` and
-  its absence is fatal (rollback still armed).
-- **`--confirm-window MINUTES`** arms `hardening-autorevert.timer` before the first access-affecting change; it
-  restores the pre-hardening `/etc/ssh` *and* UFW rules/state from the same snapshot (not a blanket
-  `ufw disable`, which would open everything the operator had closed) unless the operator runs
-  `/usr/local/sbin/hardening-confirm`. `rearm_lockout_autorevert()` restarts the timer after each prompt and
-  before the final summary, so time spent answering prompts never eats the window. It is the only mechanism
-  that recovers a server nobody can log into — the printed "test in a new terminal" warning is advice, not
-  recovery.
-- **`save_user_credentials()`** mirrors the password into `/root/.<user>-credentials` (mode 600). An
-  auto-generated password otherwise exists only in the operator's scrollback, which strands a reachable
-  server with unusable sudo.
-- **`SCRIPT_SUCCEEDED=true` is set before the final cleanup steps** (removing the provider's default user,
-  clearing password history), not at the very end of the script. This is intentional: those steps run after
-  all critical hardening has already succeeded, so their failure must not roll back working SSH/UFW/Fail2Ban
-  config — it's surfaced instead as a non-zero exit *after* `print_final_summary` has already shown the
-  operator their credentials and reconnect command.
-- `is_reserved_username()` rejects `root` as the sudo username (checked in both the interactive prompt and
-  `--user`). This isn't cosmetic: `PermitRootLogin no` blocks root SSH regardless of `AllowUsers`, so allowing
-  `root` here would let the script "succeed" while leaving the operator with no working account.
-  `ensure_sudo_user()` also requires an explicit confirmation before granting sudo/SSH access to an *existing*
-  system account (uid < 1000), to avoid silently escalating a service account.
-- `remove_provider_default_user()` (removes the cloud provider's default account, e.g. `user`) retries
-  `pkill` → `pkill -9` → `userdel -rf`, verifying via `id` that the account is actually gone rather than
-  trusting a single command's exit code. Keep `pkill` *before* `userdel`: `userdel -f` succeeds with the
-  account's processes still alive, and they keep a uid the next `useradd` may reuse. It refuses (return 1,
-  manual-removal hint at exit) when `SUDO_USER`/`logname` is that account — `pkill` would kill the operator's
-  own session and the script before the summary shows the credentials. `whoami` is useless here (always root).
-- Functions are grouped by section banners (`UI`, prompts, SSH keys, network/systemd, rollback, users, sshd,
-  other services) — keep new functions under the matching banner rather than appending at the end.
-- `verify_ssh_port_available`, `verify_sshd_port`, and `verify_ssh_ipv4_only` re-check the *effective* runtime
-  config via `sshd -T` after writing config, rather than trusting the written file — don't replace these with
-  static file checks.
-- All inline comments in this file are in English (see "Language convention" above) — e.g. the rationale for
-  the `00-hardening.conf` drop-in ordering. Don't reintroduce Russian comments here.
-
-## `dev-tools/`
-
-- `install-dev-tools.sh` — installs `git`/`uv`/`make`/`postgresql`/`docker` on apt-based systems, with
-  `--all` (default), `--interactive`, or an explicit tool list. `install_uv()` downloads astral.sh's own
-  installer to a temp file and runs `bash -n` on it before executing — it is **not** checksum-pinned like
-  `service-manager.sh`/`update_system_all.sh` are, since it's a third-party script that changes upstream; keep
-  that distinction in mind if asked to "harden" this file further.
-- `dev-tools/Makefile` is not part of this repo's own build — it's a template meant to be copied into
-  external FastAPI projects (see README "Copy into your project"). It assumes `uv`, `ruff`, `ty`, `pytest`,
-  and optionally `alembic`/`docker compose` in the *target* project, not here. `PROJECT_NAME` is a placeholder
-  (`<PROJECT_NAME>`) meant to be filled in by whoever copies it.
+- `server-scripts/CLAUDE.md` — the lockstep checksum pinning of `install_svcctl.sh`/`install_sysupdate.sh`
+  and the `configuring_server.sh` architecture notes (rollback, UFW ownership, confirm window). **Read
+  it before any change to `configuring_server.sh`.**
+- `dev-tools/CLAUDE.md` — why `install_uv()` is not checksum-pinned; the `Makefile` is a template.
+- `.claude/testing/CLAUDE.md` — the Docker scenario suites, run through the `docker-suite` skill.
+- `cli/claude-auto-ping/CLAUDE.md`, `cli/pdf-prep/CLAUDE.md` — the two Python CLIs.
+- `web3/CLAUDE.md` — pinned upstream hashes, for when the user does name a `web3/` file.
 
 ## Quality gate: .claude/RULES.md + .claude/lint.sh
 
@@ -295,69 +222,17 @@ the split and, importantly, the list of things **no** container can prove (real 
 packet filtering, Fail2Ban actually banning, host sysctl, reboot persistence, xrdp sessions) —
 those need a real VPS.
 
-### Testing harness (`.claude/testing/own-script/`)
-
-Runs `server-scripts/configuring_server.sh` through a matrix of Docker scenarios via the `/test_own_script`
-command (`.claude/commands/test_own_script.md`). Lives under `.claude/` because it's Claude Code's own tooling,
-not shipped repo content — unlike `server-scripts/`/`dev-tools/`, sourcing sibling files here is fine, it's
-never curl/wget-piped. Nested one level under `.claude/testing/<script-name>/` so each script gets its own
-sibling suite without mixing files. There are five, all built on the same `run.sh`/`lib.sh`/`scenarios.sh`
-shape: `own-script/` (`configuring_server.sh`), `devsetup/` (`install-dev-tools.sh`), `svcctl/`
-(`service-manager.sh` + `install_svcctl.sh`), `sysupdate/` (`update_system_all.sh` + `install_sysupdate.sh`)
-and `xrdp/` (`add_*_xrdp.sh`). Only `own-script/` has a slash command. The other four are launched the same
-way, but each ships its **own** `images/driver.Dockerfile` and `images/target.Dockerfile` (all five differ):
-build from that suite's driver Dockerfile under any tag, then run that suite's `run.sh` with
-`HOST_REPO_PATH` set — see `.claude/commands/test_own_script.md` for the exact `docker build`/`docker run`
-pair to adapt.
-All comments inside the harness itself are in English, per the repo-wide language convention above.
-
-- `run.sh` — entry point, must run inside the `images/driver.Dockerfile` container (docker-outside-of-docker,
-  needs `/var/run/docker.sock` mounted) so it can drive `expect` against the script's `/dev/tty` prompts.
-- `lib.sh` — shared helpers (image build/run, expect wrapper, assertions, cleanup registry).
-- `scenarios.sh` — the scenario matrix (`run_all_scenarios`); add new scenarios following the existing
-  `run_heavy_scenario` pattern.
-- `images/driver.Dockerfile` and `images/target.Dockerfile` are two distinct roles, not duplication: driver has
-  the docker CLI + `expect` and only ever calls `docker exec` on sibling containers, never running the script
-  itself; target has systemd as PID 1 (via `jrei/systemd-ubuntu:latest` — most of the script's steps are
-  `systemctl`/`ufw`/`fail2ban`, which don't work in a plain container) plus `iproute2`/`procps`, and has no
-  docker CLI or socket access at all. Ubuntu only by design.
-- Every scenario runs the full script to completion (or its natural error exit) inside a real target container —
-  including argument-parsing scenarios that fail before touching any service, kept on the same image for
-  consistency rather than a separate lightweight path.
-- Scenario logs are written to `/tmp/results/<ts>/` **inside the driver container** and die with it. Nothing
-  is mounted writable from the host: the user does not read these logs and asked that they stop accumulating
-  in the repo. Don't reintroduce a `results/` mount or a host-side `results/` directory — the summary table
-  and, on failure, the tail of each failing scenario's log (`dump_failed_logs` in `run.sh`) go to stderr,
-  which is the only report there is. **Keep the `.claude/testing/*/results/` line in `.gitignore`**: the
-  generic `*.log` rule does not cover `summary.md`, and dropping the explicit rule once already let 42 of
-  them into a commit.
-- Cleanup: each scenario's container+image are removed right after that scenario (`cleanup_scenario`); the
-  shared base layers, apt-cache volume, and driver image are removed at the end via `trap full_teardown EXIT`
-  (fires on normal completion, error, or Ctrl-C) so nothing accumulates on the host. Never points at a real SSH
-  host — Docker-only, by design.
-- Host-OS-agnostic by construction: the user works on this repo from both Windows and native Ubuntu, so the
-  only thing that ever touches the host shell directly is the one `docker run` in `test_own_script.md` that
-  launches the driver container (plain POSIX, `MSYS_NO_PATHCONV=1` is a harmless no-op outside Git Bash) —
-  every actual test step (`lib.sh`, `scenarios.sh`, `run.sh`, `drive.exp`) runs inside Linux containers
-  regardless of host OS. Don't reintroduce host-OS-specific paths or tools into `lib.sh`/`scenarios.sh`/`run.sh`.
+Every suite is launched through the `docker-suite` skill (`.claude/skills/docker-suite/`); the
+harness itself is described in `.claude/testing/CLAUDE.md`.
 
 ## `cli/`
 
 Python, not Bash, so `.claude/RULES.md` doesn't apply; `.claude/lint.sh` checks it in its last stage
-(`ruff format --check`, `ruff check`, and pdf-prep's pytest suite). Each tool is a uv project (`pyproject.toml` + `uv.lock`, `package = false`); `.venv`,
-`__pycache__`, `*.log` and `*.log.[0-9]` are already gitignored — the rotated-log rule is separate because
+(`ruff format --check`, `ruff check`, and pdf-prep's pytest suite). Each tool is a uv project (`pyproject.toml` + `uv.lock`);
+`.venv`, `__pycache__`, `*.log` and `*.log.[0-9]` are already gitignored — the rotated-log rule is separate because
 `*.log` does not match `ping.log.1`. These run from a clone, not `wget`-piped, so the single-file
-constraint doesn't bind them. `claude-auto-ping` is a user-level systemd unit, never root: `cron` is off the
-table because `configuring_server.sh` restricts it to root. It sleeps in short wall-clock steps
-(`sleep_until`) — a single long `time.sleep()` is monotonic and fires hours late after a suspend.
-`cli/claude-auto-ping/install.sh` is the exception to "cli/ runs from a clone": it is Bash, inside
-`.claude/lint.sh`, and *is* wget-piped, so it must stay single-file. It fetches only `APP_FILES`
-(`main.py`, `pyproject.toml`, `uv.lock`, the unit template) into `~/.local/share/claude-auto-ping` —
-**don't turn this back into a `git clone`**, the user removed the full-repo copy on purpose. It
-installs nothing as root and asks nothing. The interactive `claude` login is the one step it can't do,
-so it runs in two passes of the same command: `verify_login()` sends one real message *before*
-anything is downloaded, and a logged-out CLI ends pass 1 with `return 0` and instructions — not an
-error, and not a half-installed unit that would fail every slot.
+constraint doesn't bind them — except `cli/claude-auto-ping/install.sh`, which is wget-piped (see
+`cli/claude-auto-ping/CLAUDE.md`).
 
 ### `cli/pdf-prep/`
 
@@ -373,7 +248,3 @@ review, refactor, or "fix while you're in there" unless the user explicitly asks
 name. That is a rule about *feature* work: both files are inside `.claude/lint.sh`, pass
 `shfmt` and `shellcheck -S style` clean, and any edit here must keep them passing. They have no bats or
 Docker suite, so the gate is the only automated check they get.
-The one exception worth remembering if the user does ask: `web3/geth+beacon.sh` pins
-`GETH_VERSION`/`GETH_ARCHIVE_SHA256` and `PRYSM_VERSION`/`PRYSM_SCRIPT_COMMIT`/`PRYSM_SCRIPT_SHA256`, so
-bumping either binary version requires updating its paired hash from the upstream release — the same
-lockstep-checksum discipline as the `server-scripts/` installers.
