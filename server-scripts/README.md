@@ -216,7 +216,8 @@ shred -u /root/.admin-credentials     # once the password is stored elsewhere
 
 # update_system_all.sh · install_sysupdate.sh
 
-`apt-get update` → `full-upgrade` → `autoremove --purge` → `autoclean`, then `snap refresh` and
+`apt-get update` → `full-upgrade` (phased updates included, so nothing stays "deferred due to phasing") →
+`autoremove --purge` → `autoclean`, then `snap refresh` and
 `flatpak update` for both the `--user` and `--system` installations. Each optional block is skipped with an
 `[INFO]` line when the command is absent, and a failing snap/flatpak step warns instead of aborting the run.
 Ends with a reboot notice if `/var/run/reboot-required` exists.
