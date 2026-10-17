@@ -17,7 +17,7 @@ readonly BIN_DIR="/usr/local/bin"
 readonly SOURCE_URL="${BASE_URL}/update_system_all.sh"
 readonly TARGET_FILE="${BIN_DIR}/sysupdate"
 # Update the checksum together with update_system_all.sh.
-readonly EXPECTED_SHA256="5f2f03e2fc26e283e2aa845ce646df9ab6d93e8b008125cff416fb5bc2fbc60f"
+readonly EXPECTED_SHA256="5b5ac113c2274536543ba63cc03708feb9b52a90c192923b3d9821bf6d8f38e5"
 
 # =============================================================================
 # Script state

@@ -65,8 +65,10 @@ main() {
   info "APT: update package index"
   ${SUDO} apt-get update
 
-  info "APT: full upgrade"
-  ${SUDO} apt-get full-upgrade -y
+  # Without this, apt holds back updates Ubuntu is still phasing in
+  # ("deferred due to phasing") and they never land on this run.
+  info "APT: full upgrade (including phased updates)"
+  ${SUDO} apt-get full-upgrade -y -o APT::Get::Always-Include-Phased-Updates=true
 
   info "APT: remove unused packages"
   ${SUDO} apt-get autoremove --purge -y
