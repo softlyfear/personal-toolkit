@@ -249,3 +249,7 @@ source web3/cosmos_node_commands.sh && help
 # Ethereum
 bash web3/geth+beacon.sh
 ```
+
+## License
+
+[MIT](LICENSE)
