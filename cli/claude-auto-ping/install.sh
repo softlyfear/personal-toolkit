@@ -27,6 +27,8 @@ readonly INSTALL_DIR="${CLAUDE_AUTO_PING_DIR:-${HOME}/.local/share/claude-auto-p
 readonly JOURNAL_WAIT_S=10
 # Keep in sync with DEFAULT_MODEL in main.py — the login check must use the model the unit will use
 readonly PING_MODEL="haiku"
+# Keep in sync with TOKEN_PATH in main.py
+readonly TOKEN_FILE="${HOME}/.config/claude-auto-ping/oauth-token"
 # The whole application: no clone, nothing else from the repository is needed at run time
 readonly APP_FILES=("main.py" "pyproject.toml" "uv.lock" "${UNIT_NAME}.in")
 
@@ -53,7 +55,7 @@ require_preconditions() {
   [[ "${uid}" -ne 0 ]] \
     || err "Run as your normal user, not root: the unit is user-level and the login token lives in \${HOME}/.claude"
 
-  for required_cmd in wget python3 mktemp mv sed systemctl loginctl; do
+  for required_cmd in wget python3 mktemp mv sed stat systemctl loginctl; do
     command -v "${required_cmd}" > /dev/null 2>&1 \
       || err "Required command not found: ${required_cmd}"
   done
@@ -146,10 +148,27 @@ sync_dependencies() {
 # A real message is the only way to tell a logged-in CLI from a logged-out one; it doubles as the
 # smoke test. claude -p reports a refusal on stdout, so both streams are captured.
 verify_login() {
-  local output="" status=0
+  local output="" status=0 mode="" token=""
+  local -a ping_cmd=(claude -p "hi" --model "${PING_MODEL}" --no-session-persistence)
+
+  if [[ -f "${TOKEN_FILE}" ]]; then
+    mode="$(stat -c '%a' "${TOKEN_FILE}")"
+    # main.py refuses a looser file; failing here beats a unit that fails every slot
+    [[ "${mode}" == "600" || "${mode}" == "400" ]] \
+      || err "${TOKEN_FILE} has mode ${mode} — run: chmod 600 ${TOKEN_FILE}"
+    token="$(< "${TOKEN_FILE}")"
+    [[ -n "${token}" ]] || err "${TOKEN_FILE} is empty"
+    info "Using the token from ${TOKEN_FILE}"
+  fi
 
   info "Checking the login with one real message — this already opens a session window..."
-  output="$(claude -p "hi" --model "${PING_MODEL}" --no-session-persistence 2>&1)" || status=$?
+  # Through the environment of this one command, not argv: argv is visible in ps.
+  # No empty variable without a file: the saved login must stay the only credential then.
+  if [[ -n "${token}" ]]; then
+    output="$(CLAUDE_CODE_OAUTH_TOKEN="${token}" "${ping_cmd[@]}" < /dev/null 2>&1)" || status=$?
+  else
+    output="$("${ping_cmd[@]}" < /dev/null 2>&1)" || status=$?
+  fi
   if [[ "${status}" -eq 0 ]]; then
     ok "Logged in · reply: ${output:0:80}"
     return 0
@@ -161,11 +180,13 @@ verify_login() {
 
 print_login_instructions() {
   ok "Step 1 of 2 done — uv and the Claude CLI are in place"
-  info "Now log in once, interactively, as this same user:"
-  echo "  claude"
+  info "Now give it a login. Preferred: a long-lived token (a saved /login expires after ~28 days):"
+  echo "  claude setup-token      # here or on any machine with a browser; prints the token"
+  echo "  mkdir -p ${TOKEN_FILE%/*} && (umask 077 && cat > ${TOKEN_FILE})"
+  echo "                          # paste the token, Enter, Ctrl-D"
   echo ""
-  echo "On a headless server the CLI prints a URL: open it in a browser on your own machine,"
-  echo "authorise, paste the code back. Then re-run this installer to finish step 2."
+  echo "Or log in interactively as this same user: claude, then /login."
+  echo "Then re-run this installer to finish step 2."
 }
 
 # =============================================================================
