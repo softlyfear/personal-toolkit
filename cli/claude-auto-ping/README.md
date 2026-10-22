@@ -1,162 +1,179 @@
 # claude-auto-ping
 
-> Sends Claude Code one short message on a schedule (MSK: **07:00, 12:01, 17:02, 22:03**) — each one opens
-> a new **5-hour subscription session window**. No API key needed.
+A Claude subscription counts usage in **5-hour windows**, and a window starts with your first message.
+This tool sends Claude one short message four times a day, so a fresh window is already running when you
+sit down to work.
 
-Every `claude -p` call is a new session, so the window starts over. Pings run with
-`--no-session-persistence`: sessions are not written to `~/.claude` and don't pile up.
+- Sends at **07:00, 12:01, 17:02, 22:03 Moscow time**, whatever time zone the server is in.
+- Runs in the background on a Linux server and starts again by itself after a reboot.
+- Uses your Claude subscription. You don't need an API key or root.
 
 ---
 
-## Install — automatic (use this one)
+## Install in 3 steps
 
-One command does everything: installs `uv` and the Claude CLI if missing, fetches the four files this tool
-actually needs into `~/.local/share/claude-auto-ping` (override with `CLAUDE_AUTO_PING_DIR`) — no repository
-clone — sends a test ping, sets up the systemd user unit with linger, then verifies all of it. Run it as
-your normal user, **never root**:
+Log in to the server over SSH as your **normal user, not root**.
+
+**1. Run the installer.**
 
 ```bash
 bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/cli/claude-auto-ping/install.sh)
 ```
 
-It runs in two steps, the same command both times, because the interactive login is the one thing it cannot
-do for you:
+On the first run it installs the Claude CLI and `uv`. Then it stops with a message asking for a login.
+That stop is expected and is not an error.
 
-1. **Tools and login.** Installs `uv` and the Claude CLI, then sends one real message to check the login.
-   If the CLI is not logged in, it prints what `claude` said and stops right there — nothing downloaded,
-   nothing installed, exit code 0. Put a token in place (see [Login](#login)), go to step 2.
-2. **Application and unit.** Re-run the same command: it fetches the files, renders the unit, enables
-   linger and prints the checks.
+**2. Give it a login token.**
 
-Re-running is also how you update: it refetches the four files and restarts the unit.
+```bash
+claude setup-token
+```
 
-Expected tail of a finished run:
+It prints a link. Open it in a browser on any computer, sign in to your Claude account, and paste the
+code back into the terminal. It prints a long token. Save it to a file that only
+you can read:
+
+```bash
+mkdir -p ~/.config/claude-auto-ping
+(umask 077 && cat > ~/.config/claude-auto-ping/oauth-token)
+```
+
+Paste the token, press **Enter**, then **Ctrl-D**.
+
+**3. Run the same installer command again.**
+
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/softlyfear/personal-toolkit/main/cli/claude-auto-ping/install.sh)
+```
+
+It sends a test message, sets up the background service and checks it. A successful run ends like this:
 
 ```
-[OK]    Test ping delivered
-[OK]    Unit installed and started
 [OK]    check: unit enabled
 [OK]    check: unit active
 [OK]    check: linger enabled (survives logout and reboot)
-[OK]    check: schedule armed — next ping 17.09 22:03 MSK
+[OK]    check: schedule armed — next ping 22.10 22:03 MSK
 ```
 
-## Login
+That's it. You can close the SSH session now.
 
-Use a long-lived token from `claude setup-token`. A saved `/login` is not enough for a server that runs
-for months: its refresh token has a fixed lifetime (about 28 days in practice), and once it
-runs out every ping fails with `Failed to authenticate: OAuth session expired and could not be refreshed`.
+> **Why a token and not the normal `claude` login?** The normal login stops working after about four
+> weeks, and every ping fails from then on. The `setup-token` token is made for servers and lasts much
+> longer.
+
+---
+
+## Is it working?
 
 ```bash
-claude setup-token   # on the server or any machine with a browser; prints the token
-mkdir -p ~/.config/claude-auto-ping
-(umask 077 && cat > ~/.config/claude-auto-ping/oauth-token)   # paste the token, Enter, Ctrl-D
+journalctl --user -u claude-auto-ping -n 20 --no-pager
 ```
 
-`main.py` reads the file before every ping and hands it to `claude` as `CLAUDE_CODE_OAUTH_TOKEN` (never on
-the command line), so a renewed token takes effect without a restart. A file readable by group or others
-is refused. Without the file the saved `/login` in `~/.claude` is used, as before. The token can only
-send model requests — that is all a ping needs.
+| You see                     | Meaning                                                    |
+| --------------------------- | ---------------------------------------------------------- |
+| `window opened in 3.9s`     | A message went through and a new window has started.       |
+| `next ping 22.10 22:03 MSK` | Waiting for the next send time.                            |
+| `attempt 1/3 failed`        | A temporary error. It retries in 2 minutes, up to 3 times. |
+| `login is dead, no retry`   | The token stopped working. See below.                      |
+| `slot missed`               | This send was lost. The next one is still scheduled.       |
 
-## Install — manual (only from a clone)
+To watch it live, run `journalctl --user -u claude-auto-ping -f` (Ctrl-C to quit). To list only the
+failures, run `journalctl --user -u claude-auto-ping -p err --no-pager`.
 
-Nothing here is needed if the installer above finished. This path exists for developing on a clone, where
-you want the repository copy running rather than the fetched one.
+## Common problems
 
-**1. Claude CLI, logged in once, interactively:**
+**`login is dead` or `Failed to authenticate` in the log.** The token has expired or was revoked. Repeat
+step 2 and overwrite the file. You don't need to restart anything: the new token is used from the next
+send.
+
+**`... is readable by others — chmod 600 it`.** The token file has open permissions. Fix them with:
 
 ```bash
-curl -fsSL https://claude.ai/install.sh | bash   # installs to ~/.local/bin/claude
-claude                                            # log in: subscription
-claude -p "hi" --model haiku                      # check: must reply
+chmod 600 ~/.config/claude-auto-ping/oauth-token
 ```
 
-**2. Dependencies and a test message:**
+**`Not logged in`.** The token file is missing. Do step 2.
+
+**Nothing in the log after a reboot.** Run `loginctl enable-linger` once, then run the installer again.
+
+## Update, renew, remove
+
+- **Update to the latest version:** run the installer command again.
+- **Renew the token:** repeat step 2.
+- **Remove it completely:**
+
+  ```bash
+  systemctl --user disable --now claude-auto-ping
+  rm ~/.config/systemd/user/claude-auto-ping.service
+  rm -rf ~/.local/share/claude-auto-ping ~/.config/claude-auto-ping
+  ```
+
+---
+
+## Settings
+
+Change them at the top of `~/.local/share/claude-auto-ping/main.py`, then run
+`systemctl --user restart claude-auto-ping`. Running the installer again overwrites your edits.
+
+| What                 | Where                       | Default                                  |
+| -------------------- | --------------------------- | ---------------------------------------- |
+| Send times (MSK)     | `SLOTS`                     | `07:00, 12:01, 17:02, 22:03`             |
+| Model                | `--model` / `DEFAULT_MODEL` | `haiku`, which is always the latest one  |
+| Message text         | `MESSAGE`                   | `hi`                                     |
+| Token file           | `--token-file`              | `~/.config/claude-auto-ping/oauth-token` |
+| Path to `claude`     | `--claude`                  | `claude` from `PATH`                     |
+
+A send time missed while the server was off is skipped, not sent late.
+
+<details>
+<summary><b>Technical details</b></summary>
+
+### What the installer does
+
+It installs `uv` and the Claude CLI if they are missing. It downloads only the four files the tool needs
+(`main.py`, `pyproject.toml`, `uv.lock`, the unit template) into `~/.local/share/claude-auto-ping`, and
+you can change that path with `CLAUDE_AUTO_PING_DIR`. It doesn't clone the repository. It installs a
+systemd **user** unit in `~/.config/systemd/user/` and turns on linger so the unit keeps running after
+logout. Nothing is installed system-wide.
+
+The login check in step 1 sends one real message, so it already starts a window.
+
+### How the token is used
+
+`main.py` reads the token file before every send and passes it to `claude` as the environment variable
+`CLAUDE_CODE_OAUTH_TOKEN`. It never puts the token on the command line, where `ps` would show it. A file
+readable by group or others is refused. Without the file, the saved `claude` login in `~/.claude` is used.
+The token can only send model requests, and a ping needs nothing more.
+
+Each send is a new session (`claude -p`) that loads no tools or project context and is not saved in
+`~/.claude`.
+
+### Log file
+
+The log also goes to `~/.local/share/claude-auto-ping/ping.log`, with the same lines as the journal. The
+file is capped at 1 MB × 3: `ping.log` is current, `.1` is older and `.2` is the oldest. Times inside a
+line are always MSK. The journal adds its own prefix in the server's time zone, so the two can differ.
+
+```bash
+cat ~/.local/share/claude-auto-ping/ping.log.{2,1} ~/.local/share/claude-auto-ping/ping.log 2>/dev/null
+```
+
+### Running from a clone (for development)
 
 ```bash
 cd cli/claude-auto-ping
-uv sync                 # creates .venv
-uv run main.py --once   # check: one message now, then exit
-```
-
-**3. The systemd user unit.** It goes to `~/.config/systemd/user/` — the system is untouched, no root
-needed. `@reboot` in crontab won't do: `configuring_server.sh` from this repository restricts cron to root
-only.
-
-```bash
-cd cli/claude-auto-ping
+uv sync
+uv run main.py --once   # one message now, then exit
 mkdir -p ~/.config/systemd/user
 UV_BIN="$(command -v uv)"
 sed "s|__DIR__|$PWD|; s|__UV__|${UV_BIN:?uv not found in PATH}|" \
   claude-auto-ping.service.in > ~/.config/systemd/user/claude-auto-ping.service
 systemctl --user daemon-reload
 systemctl --user enable --now claude-auto-ping
-loginctl enable-linger   # the unit starts after a reboot without a manual login
+loginctl enable-linger
 ```
 
----
+A user unit is used instead of cron because `configuring_server.sh` from this repository limits cron to
+root.
 
-## Logs
-
-Two sources with the same lines: stdout goes to journald, and the same formatter writes `ping.log` next to
-`main.py` — `~/.local/share/claude-auto-ping/` after the installer, the project directory when run from a
-clone.
-
-```bash
-systemctl --user status claude-auto-ping                     # state plus the last few lines
-journalctl --user -u claude-auto-ping -f                     # follow
-journalctl --user -u claude-auto-ping --no-pager             # everything journald still keeps
-journalctl --user -u claude-auto-ping -p err --no-pager      # failed pings and missed slots only
-journalctl --user -u claude-auto-ping --since "2026-09-17"   # from a date
-```
-
-Without `--no-pager` the output opens in `less`: `q` quits, `/window opened` searches.
-
-The file log is capped at 1 MB × 3 and survives reinstalling the unit. `.2` is the oldest part, `.1` the
-middle one, the suffixless file is current:
-
-```bash
-cd ~/.local/share/claude-auto-ping
-ls -l ping.log*               # which parts exist — .1 and .2 appear only after rotation
-cat ping.log                  # current
-cat ping.log.{2,1} ping.log   # everything, oldest first
-```
-
-What the lines mean:
-
-| Line                          | Meaning                                                    |
-| ----------------------------- | ------------------------------------------------------------ |
-| `window opened in N.Ns`       | Ping delivered, a fresh 5-hour window started              |
-| `next ping DD.MM HH:MM MSK`   | Schedule armed, the process is waiting                     |
-| `exit N after N.Ns · <text>`  | `claude` refused; the text is its own message              |
-| `login is dead, no retry`     | Token or login rejected — renew it (see [Login](#login))   |
-| `slot missed`                 | The slot is lost, the next one is still scheduled          |
-| `file logging off (<path>)`   | `ping.log` is unwritable — journald is the only copy left  |
-
-Timestamps inside a line are MSK; journald prefixes its own in the host time zone, so on a non-MSK server
-the two differ by the offset — expected, the schedule is computed in `Europe/Moscow` either way.
-
-## Without systemd (alternative)
-
-```bash
-nohup uv run main.py >/dev/null 2>&1 &   # does not survive a reboot
-tmux new -s ping 'uv run main.py'
-```
-
----
-
-## Configuration
-
-All in `main.py`:
-
-| What             | Where                       | Default                           |
-| ---------------- | --------------------------- | ----------------------------------- |
-| Send slots (MSK) | `SLOTS`                     | `07:00, 12:01, 17:02, 22:03`      |
-| Model            | `--model` / `DEFAULT_MODEL` | `haiku` alias — always the latest |
-| Message text     | `MESSAGE`                   | `hi`                              |
-| Path to claude   | `--claude`                  | `claude` from PATH                |
-| Token file       | `--token-file`              | `~/.config/claude-auto-ping/oauth-token` |
-
-On failure (network, timeout) — up to 3 attempts, 2 minutes apart; a rejected login is not retried. The server time zone doesn't matter: the
-schedule is computed in `Europe/Moscow`. A slot missed while the machine was off is skipped, not caught up —
-the next ping waits for the following slot.
+</details>
