@@ -24,7 +24,7 @@ do for you:
 
 1. **Tools and login.** Installs `uv` and the Claude CLI, then sends one real message to check the login.
    If the CLI is not logged in, it prints what `claude` said and stops right there — nothing downloaded,
-   nothing installed, exit code 0. Run `claude`, log in, go to step 2.
+   nothing installed, exit code 0. Put a token in place (see [Login](#login)), go to step 2.
 2. **Application and unit.** Re-run the same command: it fetches the files, renders the unit, enables
    linger and prints the checks.
 
@@ -40,6 +40,23 @@ Expected tail of a finished run:
 [OK]    check: linger enabled (survives logout and reboot)
 [OK]    check: schedule armed — next ping 17.09 22:03 MSK
 ```
+
+## Login
+
+Use a long-lived token from `claude setup-token`. A saved `/login` is not enough for a server that runs
+for months: its refresh token has a fixed lifetime (about 28 days in practice), and once it
+runs out every ping fails with `Failed to authenticate: OAuth session expired and could not be refreshed`.
+
+```bash
+claude setup-token   # on the server or any machine with a browser; prints the token
+mkdir -p ~/.config/claude-auto-ping
+(umask 077 && cat > ~/.config/claude-auto-ping/oauth-token)   # paste the token, Enter, Ctrl-D
+```
+
+`main.py` reads the file before every ping and hands it to `claude` as `CLAUDE_CODE_OAUTH_TOKEN` (never on
+the command line), so a renewed token takes effect without a restart. A file readable by group or others
+is refused. Without the file the saved `/login` in `~/.claude` is used, as before. The token can only
+send model requests — that is all a ping needs.
 
 ## Install — manual (only from a clone)
 
@@ -112,7 +129,8 @@ What the lines mean:
 | `window opened in N.Ns`       | Ping delivered, a fresh 5-hour window started              |
 | `next ping DD.MM HH:MM MSK`   | Schedule armed, the process is waiting                     |
 | `exit N after N.Ns · <text>`  | `claude` refused; the text is its own message              |
-| `slot missed: all 3 attempts` | The slot is lost, the next one is still scheduled          |
+| `login is dead, no retry`     | Token or login rejected — renew it (see [Login](#login))   |
+| `slot missed`                 | The slot is lost, the next one is still scheduled          |
 | `file logging off (<path>)`   | `ping.log` is unwritable — journald is the only copy left  |
 
 Timestamps inside a line are MSK; journald prefixes its own in the host time zone, so on a non-MSK server
@@ -137,7 +155,8 @@ All in `main.py`:
 | Model            | `--model` / `DEFAULT_MODEL` | `haiku` alias — always the latest |
 | Message text     | `MESSAGE`                   | `hi`                              |
 | Path to claude   | `--claude`                  | `claude` from PATH                |
+| Token file       | `--token-file`              | `~/.config/claude-auto-ping/oauth-token` |
 
-On failure (network, timeout) — up to 3 attempts, 2 minutes apart. The server time zone doesn't matter: the
+On failure (network, timeout) — up to 3 attempts, 2 minutes apart; a rejected login is not retried. The server time zone doesn't matter: the
 schedule is computed in `Europe/Moscow`. A slot missed while the machine was off is skipped, not caught up —
 the next ping waits for the following slot.
