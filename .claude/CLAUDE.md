@@ -14,7 +14,7 @@ live under `.claude/` (see "Quality gate" below).
 This repo targets the current Ubuntu LTS release only — never pin that
 version number in code, comments, or docs; say "Ubuntu (latest LTS)" instead, so nothing needs updating at
 the next LTS bump. Ubuntu is the only supported target — no other distribution or derivative is in scope for
-code, tests, docs or review, and none should be added back. Where a script needs to check the running distro,
+code, tests, docs or review, and none should be added. Where a script needs to check the running distro,
 follow the existing pattern: hard
 `err` only when `apt-get` itself is missing, and `warn` (not block) when `/etc/os-release`'s `ID` isn't
 `ubuntu` — this keeps the script usable on close Ubuntu-based derivatives instead of hard-failing on an
@@ -206,7 +206,7 @@ and the tool dotfiles that must sit there (`.shellcheckrc`, `.editorconfig`, `.g
 and `.github/workflows/`, the only place GitHub reads workflows from).
 Everything else Claude Code needs goes under `.claude/`: the gate is `.claude/lint.sh`, the tests
 are `.claude/testing/`. **Don't add `scripts/`, `test/`, or any other tooling directory to the
-root** — this has already been corrected once.
+root.**
 
 ### All tests live under `.claude/testing/` — never in a top-level `test/`
 

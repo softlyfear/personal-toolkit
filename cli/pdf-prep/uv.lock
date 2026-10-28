@@ -1069,7 +1069,7 @@ rocm-windows = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", specifier = ">=0.40" },
+    { name = "anthropic", specifier = ">=1.7" },
     { name = "easyocr", specifier = ">=1.7.2" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "openai", specifier = ">=1.55" },

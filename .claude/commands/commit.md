@@ -15,7 +15,7 @@ If `$ARGUMENTS` is non-empty, treat it only as optional free-text guidance from 
 
 ## Step 1 — Collect git context
 
-Run in this order, stopping at the first failure:
+Claude Code runs the `!` commands below when this command loads and inlines their output. Read them in this order:
 
 1. Confirm a git repository:
    !`git rev-parse --is-inside-work-tree`
@@ -23,12 +23,12 @@ Run in this order, stopping at the first failure:
 
 2. Check staged changes:
    !`git diff --cached`
-   If the output is non-empty, use it as the diff and record the mode as "staged". Also run:
+   If the output is non-empty, use it as the diff and record the mode as "staged". File list:
    !`git diff --cached --name-status`
 
 3. If staged is empty, check unstaged changes:
    !`git diff`
-   If non-empty, use it as the diff and record the mode as "unstaged". Also run:
+   If non-empty, use it as the diff and record the mode as "unstaged". File list:
    !`git diff --name-status`
    If both staged and unstaged diffs are empty, skip to "No-match / failure paths" and stop.
 
@@ -52,7 +52,7 @@ If the conversation gives no signal either way (e.g. this is the first message o
 Only needed when the level from Step 2 is `assisted` or `full`:
 
 - If the conversation names a specific tool/model (e.g. "Cursor with Grok 4.5", "GPT-5"), use exactly that string, e.g. `AI (Cursor Grok 4.5)`.
-- If no other tool was named and the code was produced by Claude in this session, use the model and version that wrote it, e.g. `AI (Claude Opus 5.5)`. If the conversation does not show which model and version that was, ask the user one short question instead of dropping the version.
+- If no other tool was named and the code was produced by Claude in this session, use the model and version that wrote it, e.g. `Claude Opus 5.5`. If the conversation does not show which model and version that was, ask the user one short question instead of dropping the version.
 - If AI involvement is clear but the specific tool/model is genuinely ambiguous (e.g. multiple tools mentioned, unclear which touched this diff), stop and ask the user one short clarifying question before proposing any messages — do not silently pick one.
 
 ## Step 4 — Draft 3 distinct message options
@@ -70,7 +70,7 @@ running this command — as `Co-Authored-By: Claude <Model> <version>` (no `<…
 `… by <Model> <version>` subject suffix; a version-less `by Claude` or `by Sonnet` is not enough.
 
 - **`none`** — plain subject only. Example: `feat: add install-dev-tools.sh`
-- **`assisted`** — plain subject, blank line, then a trailer:
+- **`assisted`** — plain subject, blank line, then a trailer: `Co-Authored-By: Claude <Model> <version>` when Claude helped, `Assisted-by: AI (<tool> <version>)` for any other tool:
 
       chore: switch uv to official installer and use wget instead of curl
 
@@ -90,8 +90,3 @@ Show the 3 options as a plain numbered list in chat. Do not call `git commit`, `
 
 - **Not a git repository:** state this plainly and stop — do not propose messages.
 - **No staged or unstaged changes:** state that there is nothing to commit and stop — do not fabricate a message from repo history alone.
-- **No conversation signal on AI involvement and the diff clearly predates this conversation:** default to `none` per Step 2 — do not assume AI involvement just because the tool in use is Claude Code.
-
-## Source attribution
-
-Not applicable — this command's only inputs are the local git diff/log output and this conversation's own history, not external documents.
