@@ -26,7 +26,8 @@ class Provider:
     name: str
     model: str
 
-    def complete(self, system: str, user: str) -> str:
+    # Only the Anthropic API enforces `schema`; other providers rely on the prompt and the parser
+    def complete(self, system: str, user: str, schema: dict | None = None) -> str:
         raise NotImplementedError
 
     def check(self) -> str:
@@ -49,7 +50,7 @@ class ClaudeCliProvider(Provider):
             )
         return binary
 
-    def complete(self, system: str, user: str) -> str:
+    def complete(self, system: str, user: str, schema: dict | None = None) -> str:
         command = [
             self._binary(),
             "-p",
@@ -121,13 +122,19 @@ class AnthropicApiProvider(Provider):
             self.model = max(family, key=lambda m: m.created_at).id
         return self.model
 
-    def complete(self, system: str, user: str) -> str:
+    def complete(self, system: str, user: str, schema: dict | None = None) -> str:
         client = self._client()
+        extra = (
+            {"output_config": {"format": {"type": "json_schema", "schema": schema}}}
+            if schema
+            else {}
+        )
         message = client.messages.create(
             model=self._resolve_model(client),
             max_tokens=self.cfg.max_tokens,
             system=system,
             messages=[{"role": "user", "content": user}],
+            **extra,
         )
         return "".join(block.text for block in message.content if block.type == "text").strip()
 
@@ -156,7 +163,7 @@ class OpenAiCompatibleProvider(Provider):
             kwargs["base_url"] = self.cfg.base_url
         return OpenAI(**kwargs)
 
-    def complete(self, system: str, user: str) -> str:
+    def complete(self, system: str, user: str, schema: dict | None = None) -> str:
         response = self._client().chat.completions.create(
             model=self.model,
             max_tokens=self.cfg.max_tokens,

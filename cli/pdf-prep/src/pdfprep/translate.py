@@ -96,10 +96,16 @@ def _translate_chunk(
     )
     payload = json.dumps({block.id: block.text for block in chunk}, ensure_ascii=False)
     wanted = {block.id for block in chunk}
+    schema = {
+        "type": "object",
+        "properties": {block_id: {"type": "string"} for block_id in sorted(wanted)},
+        "required": sorted(wanted),
+        "additionalProperties": False,
+    }
     last_error = ""
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            data = _parse_reply(provider.complete(system, payload))
+            data = _parse_reply(provider.complete(system, payload, schema))
         except (ValueError, json.JSONDecodeError, PdfPrepError) as exc:
             last_error = str(exc)[:160]
             result.retries += int(attempt < MAX_ATTEMPTS)

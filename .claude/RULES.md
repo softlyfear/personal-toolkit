@@ -179,9 +179,8 @@ structures, JSON parsing beyond a single `jq` query, parallelism with synchronis
 floating-point arithmetic, should be rewritten in Python/Go, with Bash left as the glue
 layer.
 
-This repository knowingly violates that boundary — see the "Applicability boundary" section
-of the audit in `.claude/testing/unit/README.md` for the file-by-file position. The constraint above
-(single-file delivery over wget) is what keeps them in Bash.
+This repository knowingly violates that boundary: single-file delivery over wget is what keeps
+these scripts in Bash.
 
 ## Forbidden
 

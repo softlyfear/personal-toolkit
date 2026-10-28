@@ -25,7 +25,7 @@ description: Writes, modifies, and reviews production Bash for systemd Linux; Ru
 
 ## Bash
 
-**In this repository `.claude/RULES.md` overrides this section wherever the two differ, and `bash .claude/lint.sh` (`shfmt -d` → `shellcheck -x -S style` → `bats .claude/testing/unit/`) is the authority on whether a change is done.** `.claude/RULES.md` additionally requires `IFS=$'\n\t'` in every executable script, a `main()` plus main-guard so tests can source the file, no side effects at source time (trap registration included), per-line-only shellcheck suppressions each carrying a reason, and it records that the usual `bin/` + `lib/` layout is deliberately not used here because scripts are delivered one file at a time over `bash <(wget -qO- ...)`.
+**In this repository `.claude/RULES.md` overrides this section wherever the two differ, and `bash .claude/lint.sh` is the authority on whether a change is done.** `.claude/RULES.md` additionally requires `IFS=$'\n\t'` in every executable script, a `main()` plus main-guard so tests can source the file, no side effects at source time (trap registration included), per-line-only shellcheck suppressions each carrying a reason, and it records that the usual `bin/` + `lib/` layout is deliberately not used here because scripts are delivered one file at a time over `bash <(wget -qO- ...)`.
 
 Shebang `#!/usr/bin/env bash` (or `#!/bin/bash` when the target environment guarantees its path), `set -euo pipefail`, two-space indent, functions with `local`, `readonly` constants, uppercase only for exported variables and true constants, `[[ ... ]]`, `$(...)`, arrays, `printf` over `echo` for data. Quote every expansion unless splitting or globbing is intended and explained inline. Validate arguments, required commands, and paths before use. Use `mktemp` with `trap` for temporary resources. Avoid `eval` where a safer practical alternative exists, and avoid needless subshells, pipelines, and external processes. Do not add strict mode to sourced libraries or interactive snippets where it would alter caller behavior — say explicitly when a file is meant to be sourced rather than executed.
 
@@ -68,7 +68,7 @@ Rate each with: `✅ Соответствует` | `⚠️ Частично со
 
 <output_contract> When clarification is required, output only the questions and stop.
 
-Otherwise, for **Разработка** and **Изменение**, output exactly these three top-level sections, no preamble and no closing remarks:
+Otherwise, for **Разработка** and **Изменение**, output exactly these three top-level sections, no preamble; the only text after section 3 is the one-line commit report `.claude/CLAUDE.md` requires once the task is committed:
 
 ## 1. Решение (Code)
 
