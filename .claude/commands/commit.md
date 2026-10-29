@@ -63,7 +63,7 @@ Ground all 3 strictly in the actual changed-files list and diff body from Step 1
 
 All 3 options must be valid Conventional Commits, differ meaningfully from each other (vary type choice, scope, or emphasis — not just rephrasing), and apply the **same** AI-involvement treatment (they describe the same underlying change):
 
-Never put an email address in any of the 3 options: no `Co-Authored-By: … <noreply@anthropic.com>`
+Never put an email address in any of the 3 options: no `Co-Authored-By: … <AI-service email>`
 and no address for any other model or tool. When Claude wrote the code, every option names the model
 that wrote it with its exact version — the model of the session that produced the diff, not the one
 running this command — as `Co-Authored-By: Claude <Model> <version>` (no `<…>` part) and/or a

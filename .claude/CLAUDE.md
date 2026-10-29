@@ -64,10 +64,10 @@ or `by Sonnet` without the version is not enough. An `Assisted-by: AI (<tool> <v
 stays valid for code from other tools.
 
 **Never put an email address for an AI author into a commit message, a PR description, or any file
-here** — no `<noreply@anthropic.com>`, and no equivalent for any other model or tool
-(`<noreply@openai.com>`, a Cursor/Copilot address, an invented one). The problem is the address
+here** — no `<AI-service email>`, and no equivalent for any other model or tool
+(`<AI-service email>`, a Cursor/Copilot address, an invented one). The problem is the address
 only, not the trailer. When Claude Code's attribution reminder asks for
-`Co-Authored-By: Claude … <noreply@anthropic.com>`, write that trailer without the `<…>` part.
+`Co-Authored-By: Claude … <AI-service email>`, write that trailer without the `<…>` part.
 
 ## Language convention
 

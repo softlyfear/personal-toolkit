@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# guard.sh — Claude Code PreToolUse hook: turns three repository rules into checks.
+# guard.sh — Shared Claude Code/Codex PreToolUse hook: turns three repository rules into checks.
 #
 # Usage:    wired in .claude/settings.json for Bash|Edit|Write; reads the hook JSON on stdin
 # Requires: jq, bash .claude/lint.sh's own tools for the commit gate
@@ -29,6 +29,10 @@ readonly PROTECTED_CONFIGS=(
   .claude/settings.json
   .claude/hooks/guard.sh
   .claude/testing/pdf-prep/ruff.toml
+  .codex/config.toml
+  .codex/hooks.json
+  .codex/hooks/guard.sh
+  .github/workflows/gate.yml
 )
 readonly GATE_TAIL_LINES=40
 
@@ -135,8 +139,27 @@ ${tail_lines}"
   fi
 }
 
+# Normalize lexically: deleted and newly added patch targets need not exist yet.
+normalize_path() {
+  local path="$1" base="$2" part
+  local -a components=() parts=()
+  [[ ${path} == /* ]] || path="${base}/${path}"
+  IFS='/' read -r -a components <<< "${path}"
+  for part in "${components[@]}"; do
+    case "${part}" in
+      '' | .) ;;
+      ..)
+        ((${#parts[@]} == 0)) || unset 'parts[-1]'
+        ;;
+      *) parts+=("${part}") ;;
+    esac
+  done
+  printf '/%s' "${parts[@]}"
+}
+
 check_edit() {
-  local path="$1" repo="$2"
+  local path="$1" repo="$2" cwd="${3:-$2}"
+  path="$(normalize_path "${path}" "${cwd}")"
   path="${path#"${repo}/"}"
   # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
   if protected_config "${path}"; then
@@ -144,11 +167,32 @@ check_edit() {
   fi
 }
 
+check_patch() {
+  local patch="$1" repo="$2" cwd="$3" line path
+  while IFS= read -r line; do
+    case "${line}" in
+      '*** Add File: '* | '*** Update File: '* | '*** Delete File: '* | '*** Move to: '*)
+        path="${line#*: }"
+        path="$(normalize_path "${path}" "${cwd}")"
+        path="${path#"${repo}/"}"
+        # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+        if protected_config "${path}"; then
+          deny "Blocked: ${path} decides whether the quality gate passes. If the user authorized this config change, make it through Bash with the ${CONFIG_OVERRIDE} prefix."
+          return 0
+        fi
+        ;;
+      *) ;;
+    esac
+  done <<< "${patch}"
+}
+
 main() {
-  local input tool repo field
+  local input tool repo field cwd
   input="$(cat)"
   tool="$(jq -r '.tool_name // ""' <<< "${input}")"
-  repo="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}"
+  cwd="$(jq -r '.cwd // empty' <<< "${input}")"
+  cwd="${cwd:-${PWD}}"
+  repo="${CLAUDE_PROJECT_DIR:-$(git -C "${cwd}" rev-parse --show-toplevel)}"
   case "${tool}" in
     Bash)
       field="$(jq -r '.tool_input.command // ""' <<< "${input}")"
@@ -156,7 +200,11 @@ main() {
       ;;
     Edit | Write)
       field="$(jq -r '.tool_input.file_path // ""' <<< "${input}")"
-      check_edit "${field}" "${repo}"
+      check_edit "${field}" "${repo}" "${cwd}"
+      ;;
+    apply_patch)
+      field="$(jq -r '.tool_input.command // ""' <<< "${input}")"
+      check_patch "${field}" "${repo}" "${cwd}"
       ;;
     *) ;;
   esac
