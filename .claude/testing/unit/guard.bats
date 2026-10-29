@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
-# Unit tests for .claude/hooks/guard.sh, the Claude Code PreToolUse hook.
-# The commit gate itself runs .claude/lint.sh and is not exercised here.
+# Unit tests for the shared Claude Code/Codex guard and the Codex entry point.
+# Commit interception uses a stub gate; no git commit or destructive command is executed.
 
 bats_require_minimum_version 1.5.0
 
@@ -104,4 +104,80 @@ run_hook() {
   run run_hook Edit "{\"file_path\": \"${REPO_ROOT}/cli/pdf-prep/src/pdfprep/pdfdoc.py\"}"
   assert_success
   assert_output ""
+}
+
+run_codex_hook() {
+  local event
+  event="$(jq -n --arg tool "$1" --argjson input "$2" --arg cwd "${3:-${REPO_ROOT}}" \
+    '{tool_name: $tool, tool_input: $input, cwd: $cwd}')"
+  bash "${REPO_ROOT}/.codex/hooks/guard.sh" <<< "${event}"
+}
+
+@test "guard: Codex configuration and CI gate are protected" {
+  local path
+  for path in .codex/config.toml .codex/hooks.json .codex/hooks/guard.sh .github/workflows/gate.yml; do
+    protected_config "${path}"
+    run run_codex_hook Bash "{\"command\": \"tee ${path}\"}"
+    assert_success
+    assert_output --partial '"permissionDecision": "deny"'
+  done
+}
+
+@test "guard: Codex patch add, update, delete and rename targets are protected" {
+  local operation patch input
+  for operation in 'Add File' 'Update File' 'Delete File' 'Move to'; do
+    patch="$(printf '*** Begin Patch\n*** %s: .codex/hooks.json\n*** End Patch' "${operation}")"
+    input="$(jq -n --arg command "${patch}" '{command: $command}')"
+    run run_codex_hook apply_patch "${input}"
+    assert_success
+    assert_output --partial '"permissionDecision": "deny"'
+  done
+}
+
+@test "guard: Codex patches resolve paths relative to the event cwd" {
+  local input
+  input="$(jq -n --arg command $'*** Begin Patch\n*** Delete File: ../.codex/./hooks.json\n*** End Patch' '{command: $command}')"
+  run run_codex_hook apply_patch "${input}" "${REPO_ROOT}/server-scripts"
+  assert_success
+  assert_output --partial '"permissionDecision": "deny"'
+
+  input="$(jq -n --arg command "*** Update File: ${REPO_ROOT}/.claude/../.shellcheckrc" '{command: $command}')"
+  run run_codex_hook apply_patch "${input}"
+  assert_success
+  assert_output --partial '"permissionDecision": "deny"'
+}
+
+@test "guard: Codex source patches can mention protected paths without being denied" {
+  local input
+  input="$(jq -n --arg command $'*** Begin Patch\n*** Update File: server-scripts/example.sh\n@@\n+echo .codex/hooks.json\n*** End Patch' '{command: $command}')"
+  run run_codex_hook apply_patch "${input}"
+  assert_success
+  assert_output ""
+}
+
+@test "guard: a patch touching multiple protected files returns one JSON decision" {
+  local input decision
+  input="$(jq -n --arg command $'*** Begin Patch\n*** Delete File: .codex/hooks.json\n*** Delete File: .shellcheckrc\n*** End Patch' '{command: $command}')"
+  run run_codex_hook apply_patch "${input}"
+  assert_success
+  decision="$(jq -s 'length' <<< "${output}")"
+  assert_equal "${decision}" 1
+  assert_output --partial '"permissionDecision": "deny"'
+}
+
+@test "guard: both entry points intercept commits and honour the shared gate result" {
+  local fixture="${BATS_TEST_TMPDIR}/gate-fixture" entry event
+  mkdir -p "${fixture}/.claude"
+  event='{"tool_name":"Bash","tool_input":{"command":"git commit -m example"}}'
+  for entry in .claude/hooks/guard.sh .codex/hooks/guard.sh; do
+    printf 'exit 1\n' > "${fixture}/.claude/lint.sh"
+    run env CLAUDE_PROJECT_DIR="${fixture}" bash "${REPO_ROOT}/${entry}" <<< "${event}"
+    assert_success
+    assert_output --partial '"permissionDecision": "deny"'
+
+    printf 'exit 0\n' > "${fixture}/.claude/lint.sh"
+    run env CLAUDE_PROJECT_DIR="${fixture}" bash "${REPO_ROOT}/${entry}" <<< "${event}"
+    assert_success
+    assert_output ""
+  done
 }
