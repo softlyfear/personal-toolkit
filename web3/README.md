@@ -2,7 +2,7 @@
 
 > Two node-operator helpers kept for reference. **Not currently maintained** — no feature work happens here.
 
-They are still held to the repository's formatting and static-analysis gate (`bash .claude/lint.sh`), but
+They are still held to the repository's formatting and static-analysis gate (`bash .codex/lint.sh`), but
 they have no bats unit tests and no Docker scenario suite, so that gate is the only automated check they
 get. Both run from a local clone, not `wget`-piped.
 

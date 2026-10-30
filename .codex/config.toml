@@ -1,2 +1,2 @@
-# Runtime permissions are configured by the user or session, not Claude Code's settings.json.
-# Shared lint and test tooling stays in .claude/; Codex skills live in .agents/skills/.
+# Runtime permissions are configured by the user or session.
+# Shared lint and test tooling stays in .codex/; Codex skills live in .agents/skills/.

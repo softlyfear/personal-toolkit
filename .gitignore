@@ -208,7 +208,7 @@ __marimo__/
 
 # personal-toolkit: Claude Code test harness output — local diagnostic artifacts, never committed
 # summary.md is not covered by *.log above, so without this the whole directory gets committed.
-.claude/testing/*/results/
+.codex/testing/*/results/
 
 # claude-auto-ping rotated logs: *.log above does not match ping.log.1
 *.log.[0-9]
@@ -219,6 +219,6 @@ cli/pdf-prep/task/*
 cli/pdf-prep/result/*
 !cli/pdf-prep/result/.gitkeep
 cli/pdf-prep/.work/
-# test venv of .claude/lint.sh, kept apart from the launcher's GPU .venv
+# test venv of .codex/lint.sh, kept apart from the launcher's GPU .venv
 cli/pdf-prep/.venv-test/
 cli/pdf-prep/config.toml

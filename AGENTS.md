@@ -7,7 +7,7 @@ This file provides guidance to Codex when working with code in this repository.
 A collection of standalone Bash scripts for provisioning/hardening Ubuntu servers and setting up dev
 environments. The shipped scripts have no build step — each is a self-contained CLI tool meant to be run
 directly, often via `bash <(wget -qO- <raw-github-url>)` without cloning the repo first. Tooling and tests
-live under `.claude/` (see "Quality gate" below).
+live under `.codex/` (see "Quality gate" below).
 
 ## OS scope: Ubuntu (latest LTS) only
 
@@ -28,7 +28,7 @@ cli/                small personal Python CLIs (uv-managed), e.g. claude-auto-pi
 web3/               Cosmos/Ethereum node helpers — no feature work, see "web3/" note below
 ```
 
-Test tooling for `configuring_server.sh` lives in `.claude/testing/own-script/` (shared development tooling, not part of
+Test tooling for `configuring_server.sh` lives in `.codex/testing/own-script/` (shared development tooling, not part of
 the shipped repo content) — see "Testing harness" below.
 
 **Priority:** `server-scripts/` and `dev-tools/` are the actively maintained parts of this repo.
@@ -47,7 +47,7 @@ here, reviews the diff before it lands, and finds extra branches pure overhead.
 **Autonomous: one finished task, one commit, then push — without asking.** The user has handed
 this over. When a task, or a question whose answer changed files, is closed, Codex runs the gate,
 commits and pushes on its own and reports the commit in the reply. Use the session's configured
-Codex permissions; Claude Code's allow list does not configure Codex. Never intermediate or
+Codex permissions. Never intermediate or
 fix-up commits in between; a failing gate is fixed, never committed around. Subject: short, clear
 Conventional Commits line.
 
@@ -69,16 +69,15 @@ or project files. If an attribution reminder includes an address, omit the addre
 ## Language convention
 
 Repository content, comments, script output and commit messages are English. Chat replies are Russian.
-Use a concise format suited to the task; the Claude Code `senior-linux` output style does not apply to Codex.
+Use a concise format suited to the task.
 Report what changed, why, what was actually checked, and any remaining limitation.
 
 ## Codex integration and shared tooling
 
 - `AGENTS.md` contains Codex project guidance; `.codex/` holds its config and hook entry point.
-- `.agents/skills/` holds Codex skills. Claude Code keeps its own configuration and skills in `.claude/`.
-- `.claude/RULES.md`, `.claude/lint.sh` and `.claude/testing/` remain the shared rules, gate and tests.
-  Their historical directory name does not make them Claude-only; do not copy or rename the harness.
-- The shared guard implementation is `.claude/hooks/guard.sh`; `.codex/hooks/guard.sh` delegates to it.
+- `.agents/skills/` holds Codex skills, including the Docker suite runner.
+- `.codex/RULES.md`, `.codex/lint.sh` and `.codex/testing/` hold the rules, gate and tests.
+- `.codex/hooks/guard.sh` implements the configuration guard and commit gate.
 
 ## Critical constraint: scripts are curl/wget-piped, not cloned
 
@@ -122,20 +121,20 @@ Every script in `server-scripts/` and `dev-tools/` follows the same shape — ma
 ## Directory notes load on demand
 
 Read the applicable directory's `AGENTS.md` before working there, even when the session started
-at the repository root. These adapters point to the existing `CLAUDE.md` directory notes so that
-there is only one copy to maintain. Follow `/AGENTS.md` for Codex runtime configuration:
+at the repository root. Each file contains the directory-specific engineering constraints.
+Follow `/AGENTS.md` for Codex runtime configuration:
 
 - `server-scripts/AGENTS.md` — the lockstep checksum pinning of `install_svcctl.sh`/`install_sysupdate.sh`
   and the `configuring_server.sh` architecture notes (rollback, UFW ownership, confirm window). **Read
   it before any change to `configuring_server.sh`.**
 - `dev-tools/AGENTS.md` — why `install_uv()` is not checksum-pinned; the `Makefile` is a template.
-- `.claude/testing/AGENTS.md` — the Docker scenario suites, run through the `docker-suite` skill.
+- `.codex/testing/AGENTS.md` — the Docker scenario suites, run through the `docker-suite` skill.
 - `cli/claude-auto-ping/AGENTS.md`, `cli/pdf-prep/AGENTS.md` — the two Python CLIs.
-- `web3/CLAUDE.md` — pinned upstream hashes, for when the user does name a `web3/` file.
+- `web3/AGENTS.md` — pinned upstream hashes, for when the user does name a `web3/` file.
 
-## Quality gate: .claude/RULES.md + .claude/lint.sh
+## Quality gate: .codex/RULES.md + .codex/lint.sh
 
-**`.claude/RULES.md` is binding for every Bash change here — read it before editing a
+**`.codex/RULES.md` is binding for every Bash change here — read it before editing a
 script.** It fixes the prologue (`set -euo pipefail` + `IFS=$'\n\t'`), quoting, `local`,
 stdout-vs-stderr, traps, naming, the suppression policy, and the tooling set (shellcheck, shfmt,
 bats-core, shellharden, checkbashisms — nothing else).
@@ -143,19 +142,19 @@ bats-core, shellharden, checkbashisms — nothing else).
 Run the gate before considering any change done:
 
 ```bash
-bash .claude/lint.sh
+bash .codex/lint.sh
 ```
 
 It executes, in this order and stopping at the first failure: `shfmt -i 2 -ci -bn -sr -d`,
-`shellcheck -x -S style`, `bats .claude/testing/unit/`, then `ruff` on `cli/` and
-`pytest .claude/testing/pdf-prep/`. The pytest run uses its own `cli/pdf-prep/.venv-test` (CPU
+`shellcheck -x -S style`, `bats .codex/testing/unit/`, then `ruff` on `cli/` and
+`pytest .codex/testing/pdf-prep/`. The pytest run uses its own `cli/pdf-prep/.venv-test` (CPU
 torch): a plain `uv run` would re-sync the launcher's `.venv` away from its GPU build. Config lives in `.shellcheckrc` (`enable=all`),
 `.editorconfig`, `.gitattributes`. The file list comes from `git ls-files --cached --others`, so a
 newly created script is checked before it is ever staged. The only exclusion is the vendored
-`.claude/testing/unit/test_helper/`; `web3/` is included.
+`.codex/testing/unit/test_helper/`; `web3/` is included.
 
 **Commit gate and configuration guards.** `.codex/hooks.json` registers the Codex entry point
-`.codex/hooks/guard.sh` for Bash and `apply_patch` events. The shared guard runs `.claude/lint.sh`
+`.codex/hooks/guard.sh` for Bash and `apply_patch` events. The shared guard runs `.codex/lint.sh`
 before a commit, blocks destructive Git commands and protects gate/hook configuration, including
 `.codex/config.toml` and `.codex/hooks.json`. This is a tripwire for common operations, not a shell
 parser or a complete security boundary. It checks the working tree, not only staged files.
@@ -171,12 +170,12 @@ that enforcement is active without verifying it. Always run the gate before comm
 hooks are unavailable. `.github/workflows/gate.yml` runs the same gate on every push; tool hashes
 and action commits remain pinned there.
 
-**Comments: only what earns its place.** Rule 11 in `.claude/RULES.md`. A comment exists for a *why*
+**Comments: only what earns its place.** Rule 11 in `.codex/RULES.md`. A comment exists for a *why*
 the code can't show — a constraint, an ordering requirement, a trap that already caused a bug.
 Don't restate the line, don't narrate the change, don't leave notes about the work itself. One
 line where one line does. This applies to every file here, including the test harness.
 
-Two things that are easy to get wrong and are already documented in `.claude/RULES.md`:
+Two things that are easy to get wrong and are already documented in `.codex/RULES.md`:
 
 - **Suppressions.** Never global in `.shellcheckrc`. Per-line `# shellcheck disable=SCxxxx # reason`
   with the reason on the same line. ShellCheck rejects a directive in front of `elif`, a `case`
@@ -185,15 +184,14 @@ Two things that are easy to get wrong and are already documented in `.claude/RUL
 - **`IFS=$'\n\t'` has teeth.** `read -a` splits on `IFS`, so parsing space-separated values such as
   `SSH_CONNECTION` needs an explicit `IFS=' ' read -r -a ...` on that command. Sourcing a script
   from bats leaks its `IFS` into the runner and makes failing tests vanish from the report —
-  `.claude/testing/unit/helper.bash` restores the default.
+  `.codex/testing/unit/helper.bash` restores the default.
 
 ### Library docs: Context7
 
 Use the available Context7 tools to check third-party APIs that change between releases,
 including PyMuPDF, pikepdf, EasyOCR, torch and uv, and before version bumps. Discover the tools in
-the current session rather than assuming a Claude connector name. If unavailable, use official
-version-matched documentation and report any verification limitation. Claude Code's `/mcp`,
-`disabledMcpServers` and permission settings do not configure Codex. Do not add a duplicate server
+the current session. If unavailable, use official version-matched documentation and report
+any verification limitation. Do not add a duplicate server
 when Context7 is already available through an app or plugin.
 
 ### Main-guard: every shipped script is sourceable
@@ -206,39 +204,39 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
 fi
 ```
 
-so `.claude/testing/unit/*.bats` can `source` it for its functions without running anything. Keep source-time side
+so `.codex/testing/unit/*.bats` can `source` it for its functions without running anything. Keep source-time side
 effects out of file scope — that includes trap registration (`configuring_server.sh` registers
 `trap rollback_on_failure EXIT` inside `main`, not at file scope, for exactly this reason).
 
-### Repo root is for shipped scripts only; tooling lives under `.claude/`
+### Repo root is for shipped scripts only; tooling lives under `.codex/`
 
 The root holds what actually gets delivered (`server-scripts/`, `dev-tools/`, `web3/`), the docs,
 and the tool dotfiles that must sit there (`.shellcheckrc`, `.editorconfig`, `.gitattributes`,
 and `.github/workflows/`, the only place GitHub reads workflows from).
-Shared gate and test tooling stays under `.claude/`; Codex configuration lives under `.codex/`
+Shared gate and test tooling stays under `.codex/`; Codex configuration lives under `.codex/`
 and Codex skills under `.agents/skills/`. **Don't add `scripts/`, `test/`, or any other tooling directory to the
 root.**
 
-### All tests live under `.claude/testing/` — never in a top-level `test/`
+### All tests live under `.codex/testing/` — never in a top-level `test/`
 
-One root for everything test-related: `.claude/testing/unit/` holds the bats unit tests (plus the
-vendored `test_helper/`), `.claude/testing/pdf-prep/` the pytest suite for `cli/pdf-prep`, and the
+One root for everything test-related: `.codex/testing/unit/` holds the bats unit tests (plus the
+vendored `test_helper/`), `.codex/testing/pdf-prep/` the pytest suite for `cli/pdf-prep`, and the
 other sibling directories hold the Docker scenario suites, each named after the script it exercises.
 The pdf-prep tests build their PDFs in code — the user's documents never enter the repository — and
 each one reproduces a bug a real document once caused; keep new ones that way.
 
-`.claude/testing/unit/*.bats` covers pure logic only. Anything that mutates the system (apt, systemctl, ufw,
-userdel, sshd config) belongs to the Docker suites. `.claude/testing/unit/README.md` holds
+`.codex/testing/unit/*.bats` covers pure logic only. Anything that mutates the system (apt, systemctl, ufw,
+userdel, sshd config) belongs to the Docker suites. `.codex/testing/unit/README.md` holds
 the split and, importantly, the list of things **no** container can prove (real SSH lockout, UFW
 packet filtering, Fail2Ban actually banning, host sysctl, reboot persistence, xrdp sessions) —
 those need a real VPS.
 
 In Codex, launch every suite through the `docker-suite` skill (`.agents/skills/docker-suite/`); the
-harness itself is described in `.claude/testing/AGENTS.md`.
+harness itself is described in `.codex/testing/AGENTS.md`.
 
 ## `cli/`
 
-Python, not Bash, so `.claude/RULES.md` doesn't apply; `.claude/lint.sh` checks it in its last stage
+Python, not Bash, so `.codex/RULES.md` doesn't apply; `.codex/lint.sh` checks it in its last stage
 (`ruff format --check`, `ruff check`, and pdf-prep's pytest suite). Each tool is a uv project (`pyproject.toml` + `uv.lock`);
 `.venv`, `__pycache__`, `*.log` and `*.log.[0-9]` are already gitignored — the rotated-log rule is separate because
 `*.log` does not match `ping.log.1`. These run from a clone, not `wget`-piped, so the single-file
@@ -249,13 +247,13 @@ constraint doesn't bind them — except `cli/claude-auto-ping/install.sh`, which
 
 A local PDF toolbox (compress / split for a Claude Project / translate). Its internals — torch
 builds, compression checks, how sections are found — are in `cli/pdf-prep/AGENTS.md`; read it
-before changing anything there. Its tests are `.claude/testing/pdf-prep/` (pytest, part of the gate).
+before changing anything there. Its tests are `.codex/testing/pdf-prep/` (pytest, part of the gate).
 
 ## web3/ (out of scope for features, still inside the gate)
 
 `web3/cosmos_node_commands.sh` (source-only Cosmos validator helpers) and `web3/geth+beacon.sh` (Sepolia
 geth + Prysm beacon setup) are not currently maintained. **Ignore this directory by default** — don't read,
 review, refactor, or "fix while you're in there" unless the user explicitly asks about a file in `web3/` by
-name. That is a rule about *feature* work: both files are inside `.claude/lint.sh`, pass
+name. That is a rule about *feature* work: both files are inside `.codex/lint.sh`, pass
 `shfmt` and `shellcheck -S style` clean, and any edit here must keep them passing. They have no bats or
 Docker suite, so the gate is the only automated check they get.

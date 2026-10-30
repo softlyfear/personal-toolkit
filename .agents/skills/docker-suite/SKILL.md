@@ -5,7 +5,7 @@ description: Run one of this repo's Docker scenario suites — own-script (confi
 
 # Docker scenario suites
 
-Runs a suite under `.claude/testing/<suite>/` against **real behaviour** (systemctl, ufw, fail2ban,
+Runs a suite under `.codex/testing/<suite>/` against **real behaviour** (systemctl, ufw, fail2ban,
 sshd) in disposable containers on this machine. Never touches a real SSH host. Take arguments from the user's request: a suite (default `own-script`) and an optional scenario filter.
 
 ## 1. Run
@@ -55,5 +55,5 @@ interrupted run): name them and ask before removing them by hand.
 ## What no container proves
 
 Real SSH lockout, UFW packet filtering from outside, Fail2Ban actually banning, host sysctl, reboot
-persistence, xrdp sessions — see `.claude/testing/unit/README.md`. Say so when the change is in one of
+persistence, xrdp sessions — see `.codex/testing/unit/README.md`. Say so when the change is in one of
 those areas: it needs a real VPS.

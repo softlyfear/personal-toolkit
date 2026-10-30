@@ -1,4 +1,4 @@
-# The same gate as `bash .claude/lint.sh` locally, on every push: the rules in .claude/RULES.md
+# The same gate as `bash .codex/lint.sh` locally, on every push: the rules in .codex/RULES.md
 # otherwise hold only as long as someone remembers to run it.
 name: gate
 
@@ -44,5 +44,5 @@ jobs:
           sudo apt-get install -yq bats
           shellcheck --version && shfmt --version && bats --version
 
-      - name: bash .claude/lint.sh
-        run: bash .claude/lint.sh
+      - name: bash .codex/lint.sh
+        run: bash .codex/lint.sh

@@ -46,11 +46,11 @@ gitignored so that your own documents cannot end up in a commit.
 
 ## Checks
 
-Python, so `.claude/lint.sh` and `.claude/RULES.md` do not apply here — with one exception, the two
+Python, so `.codex/lint.sh` and `.codex/RULES.md` do not apply here — with one exception, the two
 `install.sh` files, which are Bash and *are* inside the gate.
 
 ```bash
 uvx ruff format --check
 uvx ruff check
-bash .claude/lint.sh      # covers cli/*/install.sh
+bash .codex/lint.sh      # covers cli/*/install.sh
 ```
