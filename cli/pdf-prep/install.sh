@@ -273,8 +273,7 @@ sync_build() {
   (cd "${project_dir}" && uv sync "${flags[@]}")
 }
 
-# Proves the build on the device: a convolution and an LSTM, the two layer types EasyOCR's
-# detector and recogniser are made of.
+# Exercise both CRAFT's convolutions and the recogniser's attention before keeping a GPU build.
 probe_gpu_build() {
   local project_dir="$1"
 
@@ -288,9 +287,12 @@ if not torch.cuda.is_available():
 device = torch.device("cuda")
 image = torch.rand(1, 3, 256, 256, device=device)
 conv = torch.nn.Conv2d(3, 16, 3, padding=1).to(device)
-lstm = torch.nn.LSTM(16, 32, bidirectional=True, batch_first=True).to(device)
-features = conv(image).mean(dim=2).transpose(1, 2)
-lstm(features)
+conv(image)
+dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+query = torch.rand(1, 4, 128, 64, device=device, dtype=dtype)
+attention = torch.nn.functional.scaled_dot_product_attention(query, query, query)
+if not torch.isfinite(attention).all():
+    sys.exit("GPU attention returned non-finite values")
 torch.cuda.synchronize()
 print(f"{torch.cuda.get_device_name(0)} · torch {torch.__version__}")
 EOF

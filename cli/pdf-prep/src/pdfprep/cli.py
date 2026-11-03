@@ -365,11 +365,13 @@ def cmd_doctor(args, cfg: Config) -> int:
         except ImportError as exc:
             checks.append((f"import {module}", "fail", str(exc)[:80]))
     if cfg.ocr_enabled:
-        try:
-            __import__("easyocr")
-            checks.append(("import easyocr", "pass", ", ".join(cfg.ocr_languages)))
-        except ImportError as exc:
-            checks.append(("import easyocr", "fail", str(exc)[:80]))
+        for module in ("easyocr", "transformers", "pylatexenc"):
+            try:
+                __import__(module)
+                checks.append((f"import {module}", "pass", ""))
+            except ImportError as exc:
+                checks.append((f"import {module}", "fail", str(exc)[:80]))
+        checks.append(("ocr engine", "pass", f"{ocr.ENGINE} · CRAFT text detection"))
         usable, detail = ocr.gpu_status()
         if cfg.ocr_device == "cpu":
             checks.append(("ocr device", "pass", "cpu (forced in config)"))

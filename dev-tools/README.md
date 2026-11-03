@@ -100,7 +100,7 @@ Then replace the `<PROJECT_NAME>` placeholder on line 3 — it is used as the `d
 Before any change to `install-dev-tools.sh` is done:
 
 ```bash
-bash .claude/lint.sh    # shfmt -d → shellcheck -x -S style → bats
+bash .codex/lint.sh    # shfmt -d → shellcheck -x -S style → bats
 ```
 
-Container scenarios for it live in `.claude/testing/devsetup/`.
+Container scenarios for it live in `.codex/testing/devsetup/`.

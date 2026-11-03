@@ -303,15 +303,15 @@ specific rule as its own and removes it without asking.
 
 | Layer    | Where                                                               | Covers                                                             |
 | -------- | ------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| Unit     | `.claude/testing/unit/*.bats`                                       | Pure logic: parsing, validation, rule classification               |
-| Scenario | `.claude/testing/{own-script,svcctl,sysupdate,xrdp}/`                | Whole scripts inside systemd Docker containers, driven by `expect` |
+| Unit     | `.codex/testing/unit/*.bats`                                       | Pure logic: parsing, validation, rule classification               |
+| Scenario | `.codex/testing/{own-script,svcctl,sysupdate,xrdp}/`                | Whole scripts inside systemd Docker containers, driven by `expect` |
 
 What no container can prove — a real SSH lockout, UFW actually filtering packets, Fail2Ban actually banning,
 host sysctl, reboot persistence, a working xrdp session — is listed in
-[`.claude/testing/unit/README.md`](../.claude/testing/unit/README.md) and needs a real VPS.
+[`.codex/testing/unit/README.md`](../.codex/testing/unit/README.md) and needs a real VPS.
 
 Before any change here is done:
 
 ```bash
-bash .claude/lint.sh    # shfmt -d → shellcheck -x -S style → bats
+bash .codex/lint.sh    # shfmt -d → shellcheck -x -S style → bats
 ```

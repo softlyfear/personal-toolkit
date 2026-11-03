@@ -25,7 +25,8 @@ It installs `uv` if missing, creates `.venv` with every dependency, creates `tas
 doctor`. It downloads nothing from this repository — the directory it ships in is the whole application.
 Re-run it to update after `git pull`.
 
-The heavy part is OCR: `easyocr` needs `torch`, and OCR runs many times faster on a GPU. The installer
+The heavy part is OCR: Xiaomi-OCR-0 transcribes text locally, with EasyOCR's CRAFT detector locating
+the text regions. Both use `torch`, and OCR runs much faster on a GPU. The installer
 probes the machine and picks one torch build, all of it inside `.venv`:
 
 | Build | When | Size |
@@ -35,11 +36,20 @@ probes the machine and picks one torch build, all of it inside `.venv`:
 | `rocm-windows` | Windows, Radeon RX 7600+ / RX 9000 / PRO W7000+ (AMD's own wheels, Python 3.12) | several GB |
 | `cpu` | anything else, and the fallback | a few hundred MB |
 
-A matching GPU is only a candidate: after the install the build must run a convolution and an LSTM on
+A matching GPU is only a candidate: after the install the build must run a convolution and attention on
 the device, or the installer falls back to `cpu`. `PDFPREP_TORCH=cpu` skips the probe. The choice is
 written into the `pdf-prep` launcher; `pdf-prep doctor` shows the device OCR will use, and
 `[ocr] device` in `config.toml` can force `cpu`. A GPU that runs out of memory mid-document hands the
-rest of it to the CPU. EasyOCR model weights land in `.work/ocr-models` on first use.
+rest of it to the CPU. CRAFT weights land in `.work/ocr-models` on first use; Xiaomi's approximately
+1.7 GB checkpoint uses the standard Hugging Face cache (`HF_HOME` can relocate it). After downloading
+both models, recognition works offline. The checkpoint revision is pinned in `ocr.py`.
+
+Xiaomi reads batches of detected text lines so their PDF coordinates remain available for search and
+selection. Formula fragments returned as LaTeX become searchable Unicode text. This mode adds a text
+layer; it does not export structured tables or rebuild the reading order of columns. Only pages without
+readable text are processed. GPU inference requires about 6 GB free memory at startup; CPU inference
+uses one region at a time and is substantially slower. Lookalike Latin/Cyrillic characters and small
+labels can still be misread.
 
 ## Use
 

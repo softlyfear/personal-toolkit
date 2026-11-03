@@ -12,7 +12,7 @@
 | **[`dev-tools/`](dev-tools/)**           | `devsetup` installer, FastAPI `Makefile` template      | [README](dev-tools/README.md)               |
 | **[`cli/`](cli/)**                       | `claude-auto-ping`, `pdf-prep` — small Python tools    | [README](cli/README.md)                     |
 | **[`web3/`](web3/)**                     | Cosmos and Ethereum node helpers · unmaintained        | [README](web3/README.md)                    |
-| `.claude/`                               | Tooling only: the quality gate and all tests           | [RULES.md](.claude/RULES.md)                |
+| `.codex/`                               | Tooling only: the quality gate and all tests           | [RULES.md](.codex/RULES.md)                |
 
 ## Quick start
 
@@ -32,15 +32,15 @@ bash <(wget -qO- https://raw.githubusercontent.com/user/personal-toolkit/main/se
 
 ## Contributing
 
-Bash standards for this repository are fixed in [`.claude/RULES.md`](.claude/RULES.md). Before any change is
+Bash standards for this repository are fixed in [`.codex/RULES.md`](.codex/RULES.md). Before any change is
 considered done:
 
 ```bash
-bash .claude/lint.sh    # shfmt -d, then shellcheck -x -S style, then bats .claude/testing/unit/
+bash .codex/lint.sh    # shfmt -d, then shellcheck -x -S style, then bats .codex/testing/unit/
 ```
 
 Requires `shfmt`, `shellcheck`, `bats` and `git`. Test layers and the list of things only a real VPS can
-verify are described in [`.claude/testing/unit/README.md`](.claude/testing/unit/README.md).
+verify are described in [`.codex/testing/unit/README.md`](.codex/testing/unit/README.md).
 
 ---
 
@@ -214,7 +214,7 @@ Details — [`cli/claude-auto-ping/README.md`](cli/claude-auto-ping/README.md)
 
 Local PDF toolbox: **compress**, **split into upload-ready parts for a Claude Project**, **translate**.
 Drop files into `task/`, run one command, collect the results from `result/`. `uv` + venv · OCR via
-EasyOCR (CPU) · Claude CLI by default for translation, API providers optional.
+Xiaomi-OCR-0 + CRAFT (local CPU/GPU) · Claude CLI by default for translation, API providers optional.
 
 **Install** — from a clone, nothing else is fetched from this repository:
 
