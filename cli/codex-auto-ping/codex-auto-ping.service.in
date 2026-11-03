@@ -1,0 +1,13 @@
+[Unit]
+Description=Codex CLI auto-ping on a schedule (MSK)
+
+[Service]
+Environment=__PATH_ENV__
+Environment=__CODEX_ENV__
+WorkingDirectory=__DIR__
+ExecStart=__UV__ run --locked main.py --codex __CODEX__
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target

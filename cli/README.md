@@ -6,6 +6,7 @@
 | Tool                                            | What it does                                                                                            | Install from                | Details                                      |
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------- | --------------------------- | -------------------------------------------- |
 | [`claude-auto-ping`](claude-auto-ping/)        | Sends Claude Code one short message at four fixed times a day, so each opens a fresh 5-hour window       | wget-piped installer        | [README](claude-auto-ping/README.md)         |
+| [`codex-auto-ping`](codex-auto-ping/) | Sends Codex CLI one short message at the same four MSK slots through a ChatGPT login | wget-piped installer or clone | [README](codex-auto-ping/README.md) |
 | [`pdf-prep`](pdf-prep/)                         | Local PDF toolbox: compress, split into upload-ready parts for a Claude Project, translate               | a clone only                | [README](pdf-prep/README.md)                 |
 
 Each tool's own README has the full story — this file only covers what they share and where they differ.
@@ -14,9 +15,10 @@ Each tool's own README has the full story — this file only covers what they sh
 
 - **`uv` manages Python.** No system Python, no `pip install`, no root. Dependencies live in a `.venv`
   inside the tool's own directory.
-- **Nothing is installed system-wide.** `claude-auto-ping` uses a *user* systemd unit in
-  `~/.config/systemd/user/`; `pdf-prep` drops a launcher into `~/.local/bin/`. Neither asks for `sudo`.
-- **Claude by default, no API key.** Both drive the `claude` CLI on your subscription. `pdf-prep` can use
+- **Nothing is installed system-wide.** Both ping tools use *user* systemd units in
+  `~/.config/systemd/user/`; `pdf-prep` drops a launcher into `~/.local/bin/`. None asks for `sudo`.
+- **No API key by default.** The ping tools drive their respective CLIs through subscription logins.
+  `pdf-prep` uses Claude by default and can use
   API providers instead, and then reads the key from an environment variable only — never a flag or a file.
 - **Nothing private is committable.** `.venv`, `__pycache__`, `*.log` and rotated `*.log.[0-9]` are
   gitignored. The rotated-log rule is separate on purpose: `*.log` does not match `ping.log.1`.
@@ -41,13 +43,21 @@ Hatchling, `src/pdfprep/`, a `pdf-prep` console script, because the launcher nee
 `BASH_SOURCE[0]`, so it only works from a copy on disk. `task/`, `result/`, `.work/` and `config.toml` are
 gitignored so that your own documents cannot end up in a commit.
 
+### codex-auto-ping — non-packaged
+
+Independent of `claude-auto-ping`, with the same schedule and systemd user service pattern. The
+installer checks for a ChatGPT login before fetching files and uses the application's own `--once`
+command for its real smoke test. No separate OAuth token file is needed. A local installer copies
+its four application files; a wget-piped installer downloads them without cloning the repository.
+
 > **Why systemd and not cron?** `configuring_server.sh` from `server-scripts/` restricts `cron` and `at` to
 > root — which is exactly why `claude-auto-ping` is a systemd *user* unit with linger enabled.
 
 ## Checks
 
-Python, so `.codex/lint.sh` and `.codex/RULES.md` do not apply here — with one exception, the two
-`install.sh` files, which are Bash and *are* inside the gate.
+`.codex/lint.sh` checks every CLI's Python formatting and lint, the Bash installers, and the
+`pdf-prep` pytest suite. `.codex/RULES.md` applies to the Bash files. Run `codex-auto-ping`'s
+additional Python tests explicitly as documented in its README.
 
 ```bash
 uvx ruff format --check

@@ -1,0 +1,16 @@
+[project]
+name = "codex-auto-ping"
+version = "0.1.0"
+description = "Pings Codex CLI through a ChatGPT login at fixed Moscow-time slots"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = ["tzdata"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

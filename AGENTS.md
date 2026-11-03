@@ -129,7 +129,8 @@ Follow `/AGENTS.md` for Codex runtime configuration:
   it before any change to `configuring_server.sh`.**
 - `dev-tools/AGENTS.md` — why `install_uv()` is not checksum-pinned; the `Makefile` is a template.
 - `.codex/testing/AGENTS.md` — the Docker scenario suites, run through the `docker-suite` skill.
-- `cli/claude-auto-ping/AGENTS.md`, `cli/pdf-prep/AGENTS.md` — the two Python CLIs.
+- `cli/claude-auto-ping/AGENTS.md`, `cli/pdf-prep/AGENTS.md` — their Python CLI constraints.
+- `cli/codex-auto-ping/AGENTS.md` — the Codex subscription ping service and its isolated requests.
 - `web3/AGENTS.md` — pinned upstream hashes, for when the user does name a `web3/` file.
 
 ## Quality gate: .codex/RULES.md + .codex/lint.sh

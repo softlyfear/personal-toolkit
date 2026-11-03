@@ -210,6 +210,18 @@ bash <(wget -qO- https://raw.githubusercontent.com/user/personal-toolkit/main/cl
 
 Details — [`cli/claude-auto-ping/README.md`](cli/claude-auto-ping/README.md)
 
+### codex-auto-ping
+
+Pings Codex CLI at the same four MSK slots through your ChatGPT login. `uv` + venv · no API key ·
+systemd user unit · ephemeral requests with reduced context.
+
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/user/personal-toolkit/main/cli/codex-auto-ping/install.sh)
+```
+
+If asked to sign in, run `codex login --device-auth` and repeat the installer.
+Details — [`cli/codex-auto-ping/README.md`](cli/codex-auto-ping/README.md)
+
 ### pdf-prep
 
 Local PDF toolbox: **compress**, **split into upload-ready parts for a Claude Project**, **translate**.
