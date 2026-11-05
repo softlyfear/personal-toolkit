@@ -259,6 +259,3 @@ name. That is a rule about *feature* work: both files are inside `.codex/lint.sh
 `shfmt` and `shellcheck -S style` clean, and any edit here must keep them passing. They have no bats or
 Docker suite, so the gate is the only automated check they get.
 
-Claude Code is also supported through `.claude/`. Its instructions import this file; shared procedures, memory and checks
-remain at their current paths. Claude-specific execution and Git attribution
-are defined in `.claude/CLAUDE.md` and `.claude/rules/git-workflow.md`.

@@ -222,8 +222,3 @@ cli/pdf-prep/.work/
 # test venv of .codex/lint.sh, kept apart from the launcher's GPU .venv
 cli/pdf-prep/.venv-test/
 cli/pdf-prep/config.toml
-
-# Local Claude settings and runtime artifacts
-.claude/settings.local.json
-CLAUDE.local.md
-.claude/testing/*/results/
