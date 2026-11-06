@@ -65,7 +65,7 @@ in the unit so it uses the same authentication storage as the installer.
 
 ## Settings and development
 
-Defaults in `main.py`: `SLOTS` as above, `DEFAULT_MODEL = "gpt-6.1-sol"`, `MESSAGE = "hi"`.
+Defaults in `main.py`: `SLOTS` as above, `DEFAULT_MODEL = "gpt-6-luna"`, `MESSAGE = "hi"`.
 `--model` selects another available model; `--codex` accepts an explicit executable path.
 Model reasoning is `low`. Local changes to installed files are replaced by an update.
 

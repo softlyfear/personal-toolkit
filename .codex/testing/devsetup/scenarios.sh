@@ -19,6 +19,8 @@ verify_all_tools() {
   assert_shell "make installed" "docker exec ${name} bash -c 'command -v make'" || rc=1
   assert_shell "postgresql active" "docker exec ${name} systemctl is-active --quiet postgresql" || rc=1
   assert_shell "docker active" "docker exec ${name} systemctl is-active --quiet docker" || rc=1
+  # shellcheck disable=SC2310 # predicate; all assertion failures are accumulated in rc
+  verify_compose_gh "${name}" || rc=1
   assert_shell "uv installed" "docker exec ${name} test -x /root/.local/bin/uv" || rc=1
   assert_shell "log warns PATH for uv" "grep -q '~/.local/bin' '$2'" || rc=1
   return "${rc}"
@@ -52,6 +54,29 @@ verify_docker_only() {
   return "${rc}"
 }
 
+verify_compose_only() {
+  local name="$1" rc=0
+  assert_shell "docker compose works" "docker exec ${name} docker compose version" || rc=1
+  assert_shell "compose validates a service" "docker exec ${name} bash -c 'printf \"services:\\n  app:\\n    image: ubuntu:latest\\n\" | docker compose -p devsetup-check -f - config --quiet'" || rc=1
+  return "${rc}"
+}
+
+verify_gh_only() {
+  local name="$1" rc=0
+  assert_shell "gh works" "docker exec ${name} gh --version" || rc=1
+  assert_shell "gh repository help works without login" "docker exec ${name} gh repo --help" || rc=1
+  return "${rc}"
+}
+
+verify_compose_gh() {
+  local name="$1" rc=0
+  # shellcheck disable=SC2310 # predicate; all assertion failures are accumulated in rc
+  verify_compose_only "${name}" || rc=1
+  # shellcheck disable=SC2310 # predicate; all assertion failures are accumulated in rc
+  verify_gh_only "${name}" || rc=1
+  return "${rc}"
+}
+
 verify_git_make() {
   local name="$1" rc=0
   assert_shell "git installed" "docker exec ${name} bash -c 'command -v git'" || rc=1
@@ -73,6 +98,8 @@ verify_interactive_git_make() {
   assert_shell "uv NOT installed (interactive n)" "! docker exec ${name} test -x /root/.local/bin/uv" || rc=1
   assert_shell "postgresql NOT active (interactive n)" "! docker exec ${name} systemctl is-active --quiet postgresql" || rc=1
   assert_shell "docker NOT active (interactive n)" "! docker exec ${name} systemctl is-active --quiet docker" || rc=1
+  assert_shell "compose NOT installed (interactive n)" "! docker exec ${name} dpkg-query -W -f='\${Status}' docker-compose-v2 | grep -q 'install ok installed'" || rc=1
+  assert_shell "gh NOT installed (interactive n)" "! docker exec ${name} bash -c 'command -v gh'" || rc=1
   return "${rc}"
 }
 
@@ -129,18 +156,20 @@ run_all_scenarios() {
     "Install make${TAB}y"
     "Install postgresql${TAB}n"
     "Install docker${TAB}n"
+    "Install compose${TAB}n"
+    "Install gh${TAB}n"
   )
   run_scenario 10_INTERACTIVE_MIXED 0 verify_interactive_git_make - args prompts || true
 
-  # shellcheck disable=SC2034 # assigned here, consumed by name (nameref) in the helper below
   args=(--interactive)
-  # shellcheck disable=SC2034 # assigned here, consumed by name (nameref) in the helper below
   prompts=(
     "Install git${TAB}n"
     "Install uv${TAB}n"
     "Install make${TAB}n"
     "Install postgresql${TAB}n"
     "Install docker${TAB}n"
+    "Install compose${TAB}n"
+    "Install gh${TAB}n"
   )
   run_scenario 11_INTERACTIVE_NONE_SELECTED 0 verify_no_tools_selected - args prompts || true
 
@@ -149,6 +178,29 @@ run_all_scenarios() {
   sep
   # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
   run_idempotent_rerun || true
+
+  args=(compose)
+  run_scenario 13_COMPOSE_ONLY 0 verify_compose_only - args || true
+
+  args=(gh)
+  run_scenario 14_GH_ONLY 0 verify_gh_only - args || true
+
+  args=(compose gh)
+  run_scenario 15_COMPOSE_GH 0 verify_compose_gh - args || true
+
+  # shellcheck disable=SC2034 # assigned here, consumed by name (nameref) in run_scenario
+  args=(--interactive)
+  # shellcheck disable=SC2034 # assigned here, consumed by name (nameref) in run_scenario
+  prompts=(
+    "Install git${TAB}n"
+    "Install uv${TAB}n"
+    "Install make${TAB}n"
+    "Install postgresql${TAB}n"
+    "Install docker${TAB}n"
+    "Install compose${TAB}y"
+    "Install gh${TAB}y"
+  )
+  run_scenario 16_INTERACTIVE_COMPOSE_GH 0 verify_compose_gh - args prompts || true
 }
 
 run_idempotent_rerun() {
