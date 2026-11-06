@@ -44,34 +44,18 @@ feature, fix, or "safety" branch before committing, and no worktree. Commit stra
 This overrides the usual "branch first when on the default branch" default: the user works alone
 here, reviews the diff before it lands, and finds extra branches pure overhead.
 
-**Autonomous: one finished task, one commit, then push — without asking.** The user has handed
-this over. When a task, or a question whose answer changed files, is closed, Codex runs the gate,
-commits and pushes on its own and reports the commit in the reply. Use the session's configured
-Codex permissions. Never intermediate or
-fix-up commits in between; a failing gate is fixed, never committed around. Subject: short, clear
-Conventional Commits line.
+**One finished task, one commit.** Never intermediate or fix-up commits splitting
+one task; run `bash .codex/lint.sh` before committing.
 
-**Decisions are Codex's to make.** Naming, placement, which of several workable options, scope of a
-fix — pick, act, and say in the reply what was chosen and why. Ask only when the choice is the user's
-alone: something the hook guards (destructive git, gate config), an action on a real server, or a
-security trade-off with no safe default.
+### Git identity
 
-### AI attribution: name the model and version, never an email address
-
-**Every commit Codex writes names the actual model and version** in an email-free
-`Co-Authored-By: Codex <model> <version>` trailer. Never substitute a Claude model name for a Codex
-model. Attribute each model that materially contributed. Author and committer must be the user from
+Attribute each model that materially contributed. Author and committer must be the user from
 `git config user.name` and `git config user.email`.
-
-Never put an AI-service email address (including an invented one) into commit messages, PR descriptions,
-or project files. If an attribution reminder includes an address, omit the address and retain the model.
+AI-service email addresses are also prohibited in PR descriptions and project files.
 
 ## Language convention
 
-Repository content, comments, script output and commit messages are English. Chat replies are Russian.
-Use a concise format suited to the task.
-Report what changed, why, what was actually checked, and any remaining limitation.
-
+Repository content, comments, script output and commit messages are English.
 ## Codex integration and shared tooling
 
 - `AGENTS.md` contains Codex project guidance; `.codex/` holds its config and hook entry point.
@@ -170,11 +154,6 @@ installation or a definition change; project trust alone does not establish hook
 that enforcement is active without verifying it. Always run the gate before committing, even when
 hooks are unavailable. `.github/workflows/gate.yml` runs the same gate on every push; tool hashes
 and action commits remain pinned there.
-
-**Comments: only what earns its place.** Rule 11 in `.codex/RULES.md`. A comment exists for a *why*
-the code can't show — a constraint, an ordering requirement, a trap that already caused a bug.
-Don't restate the line, don't narrate the change, don't leave notes about the work itself. One
-line where one line does. This applies to every file here, including the test harness.
 
 Two things that are easy to get wrong and are already documented in `.codex/RULES.md`:
 
