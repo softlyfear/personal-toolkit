@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 MSK = ZoneInfo("Europe/Moscow")
 SLOTS = ("07:00", "12:01", "17:02", "22:03")
-DEFAULT_MODEL = "gpt-6.1-sol"
+DEFAULT_MODEL = "gpt-6-luna"
 MESSAGE = "hi"
 TIMEOUT_S = 300
 ATTEMPTS = 3

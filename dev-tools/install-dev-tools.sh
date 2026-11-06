@@ -3,7 +3,7 @@
 # install-dev-tools.sh — install common development tools on Ubuntu (latest LTS)
 #
 # Usage:  bash install-dev-tools.sh [--all|--interactive|tool...]
-# Tools:  git | uv | make | postgresql | docker
+# Tools:  git | uv | make | postgresql | docker | compose | gh
 # Requires: apt-get; root or sudo (except uv installs to user home)
 #
 set -euo pipefail
@@ -13,7 +13,7 @@ IFS=$'\n\t'
 # Constants
 # =============================================================================
 
-readonly TOOLS=("git" "uv" "make" "postgresql" "docker")
+readonly TOOLS=("git" "uv" "make" "postgresql" "docker" "compose" "gh")
 
 APT_UPDATED=0
 SUDO=""
@@ -42,7 +42,7 @@ Usage:
   ${cmd}
   ${cmd} --all
   ${cmd} --interactive
-  ${cmd} <git|uv|make|postgresql|docker> [...]
+  ${cmd} <git|uv|make|postgresql|docker|compose|gh> [...]
 
 Examples:
   ${cmd}
@@ -170,6 +170,18 @@ install_docker() {
   ok "docker installed and started"
 }
 
+install_compose() {
+  info "Installing Docker Compose..."
+  apt_install docker.io docker-compose-v2
+  ok "Docker Compose installed (docker compose)"
+}
+
+install_gh() {
+  info "Installing GitHub CLI..."
+  apt_install gh
+  ok "GitHub CLI installed (gh)"
+}
+
 # =============================================================================
 # MAIN
 # =============================================================================
@@ -238,6 +250,8 @@ main() {
       make) install_make ;;
       postgresql | postgres | pg) install_postgresql ;;
       docker) install_docker ;;
+      compose) install_compose ;;
+      gh) install_gh ;;
       *) err "Unknown tool: ${tool}. Allowed: $(join_spaces "${TOOLS[@]}")" ;;
     esac
   done

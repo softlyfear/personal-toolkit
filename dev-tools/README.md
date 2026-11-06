@@ -11,7 +11,7 @@
 
 ## install-dev-tools.sh
 
-Installs `git`, `uv`, `make`, `postgresql` and `docker` on Ubuntu (latest LTS). A missing `apt-get` is
+Installs `git`, `uv`, `make`, `postgresql`, `docker`, `compose` and `gh` on Ubuntu (latest LTS). A missing `apt-get` is
 fatal; a non-`ubuntu` `/etc/os-release` `ID` only warns. Needs root or `sudo`.
 
 ```bash
@@ -20,6 +20,9 @@ bash <(wget -qO- https://raw.githubusercontent.com/user/personal-toolkit/main/de
 
 # only these two
 bash <(wget -qO- https://raw.githubusercontent.com/user/personal-toolkit/main/dev-tools/install-dev-tools.sh) git uv
+
+# Docker Compose and GitHub CLI
+bash <(wget -qO- https://raw.githubusercontent.com/user/personal-toolkit/main/dev-tools/install-dev-tools.sh) compose gh
 
 # ask y/N per tool
 bash <(wget -qO- https://raw.githubusercontent.com/user/personal-toolkit/main/dev-tools/install-dev-tools.sh) --interactive
@@ -43,6 +46,8 @@ leave the script exiting 0.
 | `make`       | `make`                              | —                                                                                                         |
 | `postgresql` | `postgresql`, `postgresql-contrib`  | `systemctl enable --now postgresql`                                                                       |
 | `docker`     | `docker.io`                         | `systemctl enable --now docker`, plus `usermod -aG docker` for `$SUDO_USER`/`$USER` — **re-login required** |
+| `compose`    | `docker.io`, `docker-compose-v2`     | Provides `docker compose`; installs Docker if needed, without changing group membership                    |
+| `gh`         | `gh`                                | Provides GitHub CLI; sign in separately with `gh auth login`                                                |
 
 `apt-get update` runs at most once per invocation (`apt_update_once`), no matter how many apt-backed tools
 were selected.

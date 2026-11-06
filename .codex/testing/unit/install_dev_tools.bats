@@ -32,6 +32,8 @@ setup() {
   assert_success
   assert_output --partial "--all"
   assert_output --partial "--interactive"
+  assert_output --partial "compose"
+  assert_output --partial "gh"
 }
 
 @test "need_cmd distinguishes present from absent commands" {
@@ -41,10 +43,10 @@ setup() {
   assert_failure
 }
 
-@test "TOOLS lists exactly the five supported tools" {
+@test "TOOLS lists exactly the seven supported tools" {
   run bash -c "source '${REPO_ROOT}/dev-tools/install-dev-tools.sh'; printf '%s\n' \"\${TOOLS[@]}\" | sort | tr '\n' ' '"
   assert_success
-  assert_output "docker git make postgresql uv "
+  assert_output "compose docker gh git make postgresql uv "
 }
 
 @test "every tool in TOOLS has a matching install_ function" {

@@ -155,7 +155,7 @@ Full reference — [`dev-tools/README.md`](dev-tools/README.md)
 
 ### devsetup
 
-Packages: `git` · `uv` · `make` · `docker` · `postgresql`
+Packages: `git` · `uv` · `make` · `docker` · `postgresql` · `compose` · `gh`
 
 ```bash
 bash <(wget -qO- https://raw.githubusercontent.com/user/personal-toolkit/main/dev-tools/install-dev-tools.sh)
