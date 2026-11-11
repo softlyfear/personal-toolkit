@@ -1,9 +1,9 @@
 # shellcheck shell=bash
 # .codex/testing/sysupdate/scenarios.sh — scenario matrix for update_system_all.sh and
 # install_sysupdate.sh. Source-only, via run.sh (after lib.sh). Ubuntu only, real
-# apt-get in a real systemd container. install_sysupdate.sh scenarios hit the REAL
-# raw.githubusercontent.com/user/personal-toolkit/main URL — they verify the
-# currently-pushed origin/main content, not local working-tree edits.
+# apt-get in a real systemd container. Successful install_sysupdate.sh scenarios
+# answer its pinned URL with the workspace copy of update_system_all.sh. A failed
+# download is covered by the unit tests.
 set -euo pipefail
 
 presetup_reboot_required() { docker exec "$1" bash -c 'touch /var/run/reboot-required'; }
@@ -175,6 +175,7 @@ run_install_fresh_then_idempotent() {
   IFS=' ' read -r tag cname <<< "${out}"
 
   local rc1=0 rc2=0
+  presetup_workspace_download "${cname}" install_sysupdate.sh update_system_all.sh
   run_install_sysupdate "${cname}" "${log1}" || rc1=$?
 
   local status="PASS" note=""
@@ -248,6 +249,7 @@ run_install_nonroot_sudo() {
   out="$(start_scenario_container "${scen_id}")" || return 1
   IFS=' ' read -r tag cname <<< "${out}"
   presetup_nonroot_user "${cname}"
+  presetup_workspace_download "${cname}" install_sysupdate.sh update_system_all.sh
 
   local rc=0
   run_install_sysupdate "${cname}" "${log}" -u updatetester || rc=$?

@@ -70,7 +70,7 @@ main() {
   trap cleanup EXIT
 
   info "Installing sysupdate to ${BIN_DIR}..."
-  wget -qO "${tmp_file}" "${SOURCE_URL}"
+  wget -qO "${tmp_file}" "${SOURCE_URL}" || err "Failed to download ${SOURCE_URL}"
 
   [[ "${EXPECTED_SHA256}" =~ ^[[:xdigit:]]{64}$ ]] || err "Invalid EXPECTED_SHA256 format in install_sysupdate.sh itself"
 

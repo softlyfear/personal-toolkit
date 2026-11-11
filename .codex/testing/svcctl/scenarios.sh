@@ -1,9 +1,9 @@
 # shellcheck shell=bash
 # .codex/testing/svcctl/scenarios.sh — scenario matrix for service-manager.sh and
 # install_svcctl.sh. Source-only, via run.sh (after lib.sh). Ubuntu only, real
-# systemctl/apt-get in a real systemd container. install_svcctl.sh scenarios hit the
-# REAL raw.githubusercontent.com/user/personal-toolkit/main URL — they verify the
-# currently-pushed origin/main content, not local working-tree edits.
+# systemctl/apt-get in a real systemd container. Successful install_svcctl.sh scenarios
+# answer its pinned URL with the workspace copy of service-manager.sh. A failed download
+# is covered by the unit tests.
 set -euo pipefail
 
 # --- Verify functions for the simple (single-invocation) scenarios ---
@@ -277,6 +277,7 @@ run_install_fresh_then_idempotent() {
   IFS=' ' read -r tag cname <<< "${out}"
 
   local rc1=0 rc2=0
+  presetup_workspace_download "${cname}" install_svcctl.sh service-manager.sh
   run_install_svcctl "${cname}" "${log1}" || rc1=$?
 
   local status="PASS" note=""
@@ -355,6 +356,7 @@ run_install_nonroot_sudo() {
   out="$(start_scenario_container "${scen_id}")" || return 1
   IFS=' ' read -r tag cname <<< "${out}"
   presetup_nonroot_user "${cname}"
+  presetup_workspace_download "${cname}" install_svcctl.sh service-manager.sh
 
   local rc=0
   run_install_svcctl "${cname}" "${log}" -u svctester || rc=$?

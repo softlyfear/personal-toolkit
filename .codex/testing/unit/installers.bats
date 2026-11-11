@@ -3,8 +3,8 @@
 #   server-scripts/install_svcctl.sh     -> installs service-manager.sh as svcctl
 #   server-scripts/install_sysupdate.sh  -> installs update_system_all.sh as sysupdate
 #
-# The download-and-install path itself is covered by the Docker suites
-# (.codex/testing/svcctl, .codex/testing/sysupdate) — see test/README.md.
+# A failed download and a rejected checksum are tested here. The Docker suites
+# cover a successful install, the sudo path, and idempotency.
 
 bats_require_minimum_version 1.5.0
 
@@ -50,6 +50,42 @@ setup() {
     run bash -c "source '${REPO_ROOT}/server-scripts/${script}.sh'; printf '%s' \"\${BASE_URL}\""
     assert_success
     assert_output --partial "raw.githubusercontent.com"
+  done
+}
+
+@test "a failed download exits 1 and names the URL" {
+  local script
+  for script in install_svcctl.sh install_sysupdate.sh; do
+    run --separate-stderr bash -c '
+      wget() { return 8; }
+      source "$1"
+      main
+    ' -- "${REPO_ROOT}/server-scripts/${script}"
+    assert_failure 1
+    [[ "${stderr}" == *"Failed to download"* ]]
+    [[ "${stderr}" == *"raw.githubusercontent.com"* ]]
+  done
+}
+
+@test "a downloaded file with the wrong checksum is rejected" {
+  local script
+  for script in install_svcctl.sh install_sysupdate.sh; do
+    run --separate-stderr bash -c '
+      wget() {
+        local dest="" prev="" arg
+        for arg in "$@"; do
+          if [[ "${prev}" == "-qO" ]]; then
+            dest="${arg}"
+          fi
+          prev="${arg}"
+        done
+        printf "not-the-pinned-script\n" > "${dest}"
+      }
+      source "$1"
+      main
+    ' -- "${REPO_ROOT}/server-scripts/${script}"
+    assert_failure 1
+    [[ "${stderr}" == *"SHA256 mismatch"* ]]
   done
 }
 

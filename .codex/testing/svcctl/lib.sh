@@ -116,12 +116,44 @@ run_svcctl() {
   return "${rc}"
 }
 
+# Serve the workspace copy when the installer requests its pinned URL. The raw host in
+# the script is the repository placeholder, so a live fetch is not what this suite proves.
+presetup_workspace_download() {
+  local name="$1" installer="$2" payload="$3"
+  local suite_dir repo_root source_url
+  suite_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  repo_root="$(cd -- "${suite_dir}/../../.." && pwd)"
+  source_url="$(bash -c 'source "$1"; printf "%s" "${SOURCE_URL}"' -- "${repo_root}/server-scripts/${installer}")"
+  docker exec -i "${name}" tee /usr/local/bin/wget > /dev/null << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+dest=""
+prev=""
+for arg in "\$@"; do
+  if [[ "\${prev}" == "-qO" || "\${prev}" == "-O" ]]; then
+    dest="\${arg}"
+  fi
+  prev="\${arg}"
+done
+url="\${!#}"
+if [[ "\${url}" == "${source_url}" ]]; then
+  [[ -n "\${dest}" ]] || exit 2
+  cp "/opt/repo/server-scripts/${payload}" "\${dest}"
+  exit 0
+fi
+exec /usr/bin/wget "\$@"
+EOF
+  docker exec "${name}" chmod 755 /usr/local/bin/wget
+}
+
 # run_install_svcctl <container> <log_file> [-u user]
+# Copy first: the mounted script can be mode 700, which a non-root exec cannot read.
 run_install_svcctl() {
   local name="$1" log_file="$2"
   shift 2
   local rc=0
-  docker exec "$@" "${name}" bash /opt/repo/server-scripts/install_svcctl.sh >> "${log_file}" 2>&1 || rc=$?
+  docker exec "${name}" install -m 755 /opt/repo/server-scripts/install_svcctl.sh /tmp/install_svcctl.sh
+  docker exec "$@" "${name}" bash /tmp/install_svcctl.sh >> "${log_file}" 2>&1 || rc=$?
   return "${rc}"
 }
 
