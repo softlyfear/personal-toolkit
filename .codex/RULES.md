@@ -33,10 +33,6 @@ Config lives in `.shellcheckrc` (`enable=all`), `.editorconfig` and `.gitattribu
 8. Read line by line only as: `while IFS= read -r line; do ...; done < "$file"`.
 9. File lists via arrays/globs or `find -print0` + `read -r -d ''`.
 10. Constants: `readonly` / `declare -r`, UPPER_CASE. Functions: lower_snake_case.
-11. Comments earn their place or they go. Write a comment only for a *why* the code cannot
-    show: a non-obvious constraint, an ordering requirement, a trap that already cost a
-    bug. Never restate what the line does, never narrate a change, never leave commentary
-    about the work. One line where one line does; a paragraph only for a real trap.
 
 ### Note on rule 6 and the single EXIT slot
 

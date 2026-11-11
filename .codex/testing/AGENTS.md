@@ -1,6 +1,6 @@
 # AGENTS.md — .codex/testing/
 
-The repository-wide rules are in `/AGENTS.md`.
+The repository-wide rules are in `../../AGENTS.md`.
 
 ## Docker scenario suites
 
@@ -11,7 +11,6 @@ and `xrdp/` (`add_*_xrdp.sh`). Every one is launched through the `docker-suite` 
 (`.agents/skills/docker-suite/scripts/run-suite.sh <suite>`), which builds that suite's **own**
 `images/driver.Dockerfile` — all five differ. Sourcing sibling files is fine here: this is development
 tooling, never curl/wget-piped.
-All comments inside the harness itself are in English, per the repo-wide language convention.
 
 - `run.sh` — entry point, must run inside the `images/driver.Dockerfile` container (docker-outside-of-docker,
   needs `/var/run/docker.sock` mounted) so it can drive `expect` against the script's `/dev/tty` prompts.

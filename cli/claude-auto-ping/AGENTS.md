@@ -1,6 +1,6 @@
 # AGENTS.md — cli/claude-auto-ping
 
-The repository-wide rules are in `/AGENTS.md`.
+The repository-wide rules are in `../../AGENTS.md`.
 
 `claude-auto-ping` is a user-level systemd unit, never root: `cron` is off the
 table because `configuring_server.sh` restricts it to root. It sleeps in short wall-clock steps

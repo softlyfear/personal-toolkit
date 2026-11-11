@@ -1,6 +1,6 @@
 # AGENTS.md — server-scripts/
 
-The repository-wide rules are in `/AGENTS.md`.
+The repository-wide rules are in `../AGENTS.md`.
 
 ## Checksum pinning — update in lockstep
 
@@ -80,5 +80,3 @@ points to preserve when modifying it:
 - `verify_ssh_port_available`, `verify_sshd_port`, and `verify_ssh_ipv4_only` re-check the *effective* runtime
   config via `sshd -T` after writing config, rather than trusting the written file — don't replace these with
   static file checks.
-- All inline comments in this file are in English (see "Language convention" in `/AGENTS.md`) — e.g. the rationale for
-  the `00-hardening.conf` drop-in ordering. Don't reintroduce Russian comments here.

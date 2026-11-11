@@ -1,6 +1,6 @@
 # AGENTS.md — cli/pdf-prep
 
-The repository-wide rules are in `/AGENTS.md`.
+The repository-wide rules are in `../../AGENTS.md`.
 
 ## What is easy to break
 

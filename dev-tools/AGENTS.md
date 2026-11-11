@@ -1,6 +1,6 @@
 # AGENTS.md — dev-tools/
 
-The repository-wide rules are in `/AGENTS.md`.
+The repository-wide rules are in `../AGENTS.md`.
 
 - `install-dev-tools.sh` — installs `git`/`uv`/`make`/`postgresql`/`docker` on apt-based systems, with
   `--all` (default), `--interactive`, or an explicit tool list. `install_uv()` downloads astral.sh's own

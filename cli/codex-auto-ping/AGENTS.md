@@ -1,6 +1,6 @@
 # AGENTS.md — cli/codex-auto-ping
 
-Follow the repository-wide rules in `/AGENTS.md`.
+Follow the repository-wide rules in `../../AGENTS.md`.
 
 This is a separate, non-packaged uv project. Keep it independent of `claude-auto-ping`:
 the wget-piped installer downloads only its own `APP_FILES`, without cloning the repository.

@@ -29,7 +29,7 @@ web3/               Cosmos/Ethereum node helpers — no feature work, see "web3/
 ```
 
 Test tooling for `configuring_server.sh` lives in `.codex/testing/own-script/` (shared development tooling, not part of
-the shipped repo content) — see "Testing harness" below.
+the shipped repo content) — see "All tests live under `.codex/testing/`" below.
 
 **Priority:** `server-scripts/` and `dev-tools/` are the actively maintained parts of this repo.
 **`server-scripts/configuring_server.sh` is the most important script here** — it is the largest, the riskiest
@@ -39,38 +39,19 @@ read, review, or modify it unless the user explicitly names a file in it.
 
 ## Git workflow: `main` only
 
+Author and committer must be the user from `git config user.name` and `git config user.email`.
+
 This repository has exactly one branch and keeps it that way. **Never create a branch** — no
 feature, fix, or "safety" branch before committing, and no worktree. Commit straight to `main`.
-This overrides the usual "branch first when on the default branch" default: the user works alone
-here, reviews the diff before it lands, and finds extra branches pure overhead.
+This is the repository workflow chosen by the user, who works alone and reviews the diff
+before publication. It does not override applicable platform instructions.
 
-**Autonomous: one finished task, one commit, then push — without asking.** The user has handed
-this over. When a task, or a question whose answer changed files, is closed, Codex runs the gate,
-commits and pushes on its own and reports the commit in the reply. Use the session's configured
-Codex permissions. Never intermediate or
-fix-up commits in between; a failing gate is fixed, never committed around. Subject: short, clear
-Conventional Commits line.
-
-**Decisions are Codex's to make.** Naming, placement, which of several workable options, scope of a
-fix — pick, act, and say in the reply what was chosen and why. Ask only when the choice is the user's
-alone: something the hook guards (destructive git, gate config), an action on a real server, or a
-security trade-off with no safe default.
-
-### AI attribution: name the model and version, never an email address
-
-**Every commit Codex writes names the actual model and version** in an email-free
-`Co-Authored-By: Codex <model> <version>` trailer. Never substitute a Claude model name for a Codex
-model. Attribute each model that materially contributed. Author and committer must be the user from
-`git config user.name` and `git config user.email`.
-
-Never put an AI-service email address (including an invented one) into commit messages, PR descriptions,
-or project files. If an attribution reminder includes an address, omit the address and retain the model.
+**One finished task, one commit.** Never intermediate or fix-up commits splitting
+one task; run `bash .codex/lint.sh` before committing.
 
 ## Language convention
 
-Repository content, comments, script output and commit messages are English. Chat replies are Russian.
-Use a concise format suited to the task.
-Report what changed, why, what was actually checked, and any remaining limitation.
+User-facing repository documentation and script output are English.
 
 ## Codex integration and shared tooling
 
@@ -122,7 +103,7 @@ Every script in `server-scripts/` and `dev-tools/` follows the same shape — ma
 
 Read the applicable directory's `AGENTS.md` before working there, even when the session started
 at the repository root. Each file contains the directory-specific engineering constraints.
-Follow `/AGENTS.md` for Codex runtime configuration:
+Directory-specific constraints:
 
 - `server-scripts/AGENTS.md` — the lockstep checksum pinning of `install_svcctl.sh`/`install_sysupdate.sh`
   and the `configuring_server.sh` architecture notes (rollback, UFW ownership, confirm window). **Read
@@ -170,11 +151,6 @@ installation or a definition change; project trust alone does not establish hook
 that enforcement is active without verifying it. Always run the gate before committing, even when
 hooks are unavailable. `.github/workflows/gate.yml` runs the same gate on every push; tool hashes
 and action commits remain pinned there.
-
-**Comments: only what earns its place.** Rule 11 in `.codex/RULES.md`. A comment exists for a *why*
-the code can't show — a constraint, an ordering requirement, a trap that already caused a bug.
-Don't restate the line, don't narrate the change, don't leave notes about the work itself. One
-line where one line does. This applies to every file here, including the test harness.
 
 Two things that are easy to get wrong and are already documented in `.codex/RULES.md`:
 
@@ -258,4 +234,3 @@ review, refactor, or "fix while you're in there" unless the user explicitly asks
 name. That is a rule about *feature* work: both files are inside `.codex/lint.sh`, pass
 `shfmt` and `shellcheck -S style` clean, and any edit here must keep them passing. They have no bats or
 Docker suite, so the gate is the only automated check they get.
-
