@@ -189,6 +189,38 @@ setup() {
 
 # --- Network / systemd probes (external commands mocked) --------------------
 
+@test "IPv6 preference replaces IPv4-first rules and preserves unrelated policy" {
+  local policy="${BATS_TEST_TMPDIR}/gai.conf"
+  printf '# retained comment\n  precedence ::ffff:0:0/96 100\nprecedence ::/0 5\nlabel fc00::/7 6\nscopev4 ::ffff:169.254.0.0/112 2\n' > "${policy}"
+  run render_ipv6_preference "${policy}"
+  assert_success
+  assert_output --partial '# retained comment'
+  assert_output --partial 'label fc00::/7 6'
+  assert_output --partial 'scopev4 ::ffff:169.254.0.0/112 2'
+  assert_output --partial 'precedence ::/0 40'
+  assert_output --partial 'precedence ::ffff:0:0/96 10'
+  refute_output --partial 'precedence ::ffff:0:0/96 100'
+  refute_output --partial 'precedence ::/0 5'
+  printf '%s\n' "${output}" > "${policy}"
+  local first="${output}"
+  run render_ipv6_preference "${policy}"
+  assert_success
+  assert_output "${first}"
+}
+
+@test "ss_listening_on_ipv6_port accepts wildcard and specific IPv6 listeners" {
+  ss() {
+    [[ "$1" == -6 ]] || return 1
+    printf 'LISTEN 0 128 *:2244 *:*\nLISTEN 0 128 [2001:db8::1]:2255 [::]:*\n'
+  }
+  run ss_listening_on_ipv6_port 2244
+  assert_success
+  run ss_listening_on_ipv6_port 2255
+  assert_success
+  run ss_listening_on_ipv6_port 22
+  assert_failure
+}
+
 @test "detect_server_ip prefers the server address from SSH_CONNECTION" {
   SSH_CONNECTION="203.0.113.5 51000 198.51.100.7 22" run detect_server_ip
   assert_success

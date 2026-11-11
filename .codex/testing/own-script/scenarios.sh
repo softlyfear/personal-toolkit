@@ -70,7 +70,7 @@ verify_common_hardening() {
   assert_match "effective port ${port}" "${cfg}" "^port ${port}$" || rc=1
   assert_match "effective AllowUsers ${user}" "${cfg}" "^allowusers ${user}$" || rc=1
   assert_match "PermitRootLogin no" "${cfg}" '^permitrootlogin no$' || rc=1
-  assert_match "AddressFamily inet" "${cfg}" '^addressfamily inet$' || rc=1
+  assert_match "AddressFamily any" "${cfg}" '^addressfamily any$' || rc=1
   assert_match "PermitEmptyPasswords no" "${cfg}" '^permitemptypasswords no$' || rc=1
   assert_match "KbdInteractiveAuthentication no" "${cfg}" '^kbdinteractiveauthentication no$' || rc=1
   assert_match "HostbasedAuthentication no" "${cfg}" '^hostbasedauthentication no$' || rc=1
@@ -89,8 +89,10 @@ verify_common_hardening() {
   assert_match "LoginGraceTime 30" "${cfg}" '^logingracetime 30$' || rc=1
   assert_match "UsePAM yes" "${cfg}" '^usepam yes$' || rc=1
   assert_shell "sshd listening on :${port}" "docker exec ${name} ss -tln | grep -q ':${port} '" || rc=1
-  assert_shell "no IPv6 sshd listener on :${port}" \
-    "! docker exec ${name} ss -tln | grep -q '\\[::\\]:${port} '" || rc=1
+  assert_shell "IPv4 sshd listener on :${port}" \
+    "docker exec ${name} ss -4 -tln | grep -q ':${port} '" || rc=1
+  assert_shell "IPv6 sshd listener on :${port}" \
+    "docker exec ${name} ss -6 -tln | grep -q ':${port} '" || rc=1
   # On port 22 sshd stays socket-activated, so ssh.service itself may be inactive —
   # accept either the service or the socket being up.
   assert_shell "ssh service or socket active" \
@@ -144,6 +146,14 @@ verify_common_hardening() {
   assert_match "UFW default deny in / allow out" "${ufw_verbose}" '^Default: deny \(incoming\), allow \(outgoing\)' || rc=1
   assert_shell "UFW persists across reboot (ENABLED=yes)" \
     "docker exec ${name} grep -q '^ENABLED=yes' /etc/ufw/ufw.conf" || rc=1
+  assert_shell "UFW IPv6 filtering enabled" \
+    "docker exec ${name} grep -q '^IPV6=yes$' /etc/default/ufw" || rc=1
+  assert_shell "exactly one IPv6 LIMIT rule for ${port}/tcp" \
+    "[[ \$(docker exec ${name} ufw status numbered | grep -cE '${port}/tcp[[:space:]]+\\(v6\\)[[:space:]]+LIMIT') == 1 ]]" || rc=1
+  assert_shell "native IPv6 has higher glibc precedence than IPv4" \
+    "docker exec ${name} awk '\$1 == \"precedence\" && \$2 == \"::/0\" { v6 = \$3 } \$1 == \"precedence\" && \$2 == \"::ffff:0:0/96\" { v4 = \$3 } END { exit !(v6 > v4 && v4 > 0) }' /etc/gai.conf" || rc=1
+  assert_shell "no address policy rollback backup left behind" \
+    "! docker exec ${name} bash -c 'ls /etc/gai.conf.bak_* >/dev/null 2>&1'" || rc=1
   # Exactly one: the v6 twin renders as "<port>/tcp (v6)  LIMIT" and must not match,
   # so a second match here means a duplicated rule, not the IPv6 counterpart.
   assert_shell "exactly one LIMIT rule for ${port}/tcp" \
@@ -390,6 +400,10 @@ verify_rollback_on_failure() {
   local name="$1" log="$2" rc=0
 
   assert_shell "rollback actually ran" "grep -q 'Rolling back critical changes' '${log}'" || rc=1
+  assert_shell "address policy restored exactly" \
+    "docker exec ${name} cmp /root/gai-before.conf /etc/gai.conf" || rc=1
+  assert_shell "UFW IPv6 setting restored exactly" \
+    "docker exec ${name} cmp /root/ufw-default-before /etc/default/ufw" || rc=1
   assert_shell "sshd port restored to 22" "docker exec ${name} sshd -T | grep -qE '^port 22$'" || rc=1
   assert_shell "no hardening drop-in left behind" \
     "! docker exec ${name} test -e /etc/ssh/sshd_config.d/00-hardening.conf" || rc=1
@@ -445,7 +459,15 @@ verify_rollback_ufw_midstep() {
 
 # --- Presetup functions: container state before the interactive run ---
 
-presetup_password_file() { docker exec "$1" bash -c 'printf "Str0ngP@ssphrase!23\n" > /root/.testpass && chmod 600 /root/.testpass'; }
+presetup_password_file() {
+  docker exec "$1" bash -c '
+    printf "Str0ngP@ssphrase!23\n" > /root/.testpass && chmod 600 /root/.testpass
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq && apt-get install -y -qq ufw
+    sed -i "s/^IPV6=.*/IPV6=no/" /etc/default/ufw
+    ufw limit 2244/tcp && ufw --force enable
+    printf "precedence ::ffff:0:0/96 100\n" > /etc/gai.conf'
+}
 presetup_provider_user() { docker exec "$1" useradd -m -s /bin/bash user; }
 presetup_system_account() { docker exec "$1" useradd -r -m -d /home/svcacct -s /bin/bash svcacct; }
 
@@ -477,8 +499,12 @@ presetup_fail_at_fail2ban() {
   docker exec "$1" bash -c '
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq && apt-get install -y -qq ufw
+    sed -i "s/^IPV6=.*/IPV6=no/" /etc/default/ufw
     ufw --force enable && ufw allow 80/tcp
     ufw status verbose > /root/ufw-before.txt
+    cp -p /etc/default/ufw /root/ufw-default-before
+    printf "# operator policy\nprecedence ::ffff:0:0/96 100\n" > /etc/gai.conf
+    cp -p /etc/gai.conf /root/gai-before.conf
     mkdir -p /etc/systemd/system/fail2ban.service.d
     printf "[Service]\nExecStartPre=/bin/false\n" > /etc/systemd/system/fail2ban.service.d/force-failure.conf
     systemctl daemon-reload' > /dev/null

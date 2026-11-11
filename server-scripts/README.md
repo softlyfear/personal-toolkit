@@ -78,7 +78,7 @@ The order **is** the safety property — each step assumes the previous one succ
 | 2 | Packages              | `sudo openssh-server fail2ban ufw unattended-upgrades`                                                                                             |
 | 3 | Auto-upgrades, NTP    | Unattended security upgrades with `Automatic-Reboot "false"`; `chrony` / `chronyd` / `systemd-timesyncd`, then polls `NTPSynchronized` for ≤ 30 s |
 | 4 | **SSH + sudo user**   | Asks key-only or password-only, creates the user, grants sudo, installs and **verifies** the key, writes the sshd drop-in, restarts sshd            |
-| 5 | **UFW**               | Opens the SSH port *first*, sets `deny incoming` / `allow outgoing`, prunes other rules, enables logging and the firewall, re-checks the SSH rule   |
+| 5 | **UFW + IPv6 preference** | Enables IPv6 filtering, opens SSH for both families, sets `deny incoming` / `allow outgoing`, prunes other rules, verifies both SSH rules; prefers native IPv6 via glibc |
 | 6 | Fail2Ban              | `sshd` jail, `banaction = ufw`, `backend = systemd` — ban 1 h after 3 failures in 10 min                                                            |
 | 7 | sysctl                | `/etc/sysctl.d/98-hardening.conf` plus a re-apply unit                                                                                             |
 | 8 | journald, cron/at     | Journal size and retention limits; `cron` and `at` restricted to root                                                                              |
@@ -108,6 +108,8 @@ strands a reachable server with unusable sudo.
 | `~<user>/.ssh/authorized_keys`                                   | `600`, owned by the user; `.ssh` is `700`                                  |
 | `/etc/apt/apt.conf.d/20auto-upgrades`, `51custom-unattended-…`  | Unattended upgrades, no auto-reboot                                        |
 | `/etc/fail2ban/jail.local`                                       | `[DEFAULT]` + `[sshd]` jail on the new port                                |
+| `/etc/default/ufw`                                              | `IPV6=yes` so both address families are filtered                           |
+| `/etc/gai.conf`                                                 | Complete precedence table preferring native IPv6 over IPv4                 |
 | `/etc/sysctl.d/98-hardening.conf`                                | Syncookies, redirect/source-route rejection, `rp_filter`, `log_martians`   |
 | `/etc/systemd/system/sysctl-hardening.service`                   | Re-applies the file after `network-online.target`                          |
 | `/etc/systemd/journald.conf.d/99-vps-limits.conf`                | `SystemMaxUse=200M`, `RuntimeMaxUse=100M`, `MaxRetentionSec=14day`         |
@@ -116,20 +118,38 @@ strands a reachable server with unusable sudo.
 | `/var/log/sysctl-hardening-<timestamp>.log`                      | Output of the sysctl pass                                                  |
 
 The drop-in is named `00-` on purpose: sshd keeps the **first** value it reads and drop-ins are read in
-lexicographic order, so `00-` wins over Ubuntu's `50-cloud-init.conf`. It pins `Port`, `AddressFamily inet`,
-`ListenAddress 0.0.0.0`, `PermitRootLogin no`, `AllowUsers <user>`, the auth block, and then
+lexicographic order, so `00-` wins over Ubuntu's `50-cloud-init.conf`. It pins `Port`, `AddressFamily any`,
+`ListenAddress 0.0.0.0`, `ListenAddress ::`, `PermitRootLogin no`, `AllowUsers <user>`, the auth block, and then
 `MaxAuthTries 3`, `MaxSessions 3`, `MaxStartups 10:30:60`, `LoginGraceTime 30`, `ClientAliveInterval 300`,
 forwarding/tunnel/X11/agent all off, `PermitUserEnvironment no`, `Compression no`.
 
 `/etc/ssh/sshd_config` itself is never edited — it is backed up before the drop-in is written, and the
 backup is deleted once the run succeeds.
 
+### IPv6 connectivity and preference
+
+SSH accepts both IPv4 and IPv6 when the kernel supports them. UFW filters both families and must have
+a `LIMIT` rule for the selected SSH port in each family. IPv4 remains available.
+
+The script sets the complete default glibc precedence table in `/etc/gai.conf`, replacing existing
+`precedence` directives (including IPv4-first overrides) while preserving other directives and comments.
+Native IPv6 has precedence 40 and IPv4 has precedence 10. This influences applications using glibc
+`getaddrinfo`; existing processes may need restarting, and applications with their own connection
+selection can choose differently. It does not force all traffic through IPv6 or guarantee automatic
+fallback in every application.
+
+IPv6 Internet access still requires an enabled IPv6 stack, a provider-configured global address and route,
+and an IPv6 destination (usually a DNS AAAA record). The script warns if no global address or default
+route is present; it does not change Netplan, provider routing, kernel boot flags or externally configured
+IPv6-disable settings. The script itself does not disable IPv6 globally. Verify actual connectivity from
+the VPS, including after reboot; Docker cannot prove provider routing or external firewall behavior.
+
 ## Safety mechanisms
 
 ### Verification, not assumption
 
 After the sshd restart the script reads the *effective* config with `sshd -T` — `PermitRootLogin`, the auth
-method, the port — and checks `ss -tln` for a listener on the new port and for the absence of an IPv6 one.
+method, the port, the address family — and checks listeners for IPv4 and, when enabled, IPv6.
 A key is verified with `ssh-keygen -l -f` **before** root login is disabled. `net.ipv4.tcp_syncookies` is
 read back after the sysctl pass, because `/etc/sysctl.conf` is read last by `sysctl --system` and a provider
 image once overrode the hardened value from there.
@@ -142,6 +162,7 @@ image once overrode the hardened value from there.
 - unmasks and re-enables `ssh.socket`, restoring the original `ssh.service` enablement;
 - restores `jail.local` and `/etc/sudoers.d/<user>`;
 - restores the UFW state files **and** the previous enabled/disabled state;
+- restores `/etc/gai.conf`, or removes it if it did not exist before the run;
 - removes the sysctl unit and disarms the auto-revert timer.
 
 The created *account* is never deleted — it is reported instead, with a pointer to the credentials file.

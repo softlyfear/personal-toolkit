@@ -82,6 +82,8 @@ CLI_PRESET_PASSWORD_FLAG=""
 CONFIRM_WINDOW_MIN=0
 PROVIDER_USER_CLEANUP_FAILED=false
 ROLLBACK_SYSCTL_UNIT_CREATED=false
+ROLLBACK_GAI_MODIFIED=false
+ROLLBACK_GAI_BACKUP=""
 # Set once this script creates the account or grants it sudo — an account that merely
 # happened to exist must not be reported as something the rollback left behind.
 ROLLBACK_USER_MODIFIED=false
@@ -165,7 +167,8 @@ print_final_summary() {
   fi
 
   sum_item "Sudo user" "${SSH_USER} · AllowUsers · root login disabled"
-  sum_item "SSH port" "${SSH_PORT}/tcp · IPv4 only"
+  sum_item "SSH port" "${SSH_PORT}/tcp · IPv4 + IPv6 when available"
+  sum_item "Outgoing connections" "IPv6 preferred via glibc · IPv4 available"
   [[ "${SSH_PORT}" != "22" ]] && sum_item "ssh.socket" "disabled and masked"
   if [[ -n "${UFW_EXTRA_OPEN_TARGETS}" ]]; then
     sum_item "UFW" "enabled · ${SSH_PORT}/tcp (limit) · also open: ${UFW_EXTRA_OPEN_TARGETS//,/, } · logging on"
@@ -715,8 +718,11 @@ ss_listening_on_port() {
 
 ss_listening_on_ipv6_port() {
   local port="$1"
-  ss -tln 2> /dev/null | awk -v port="${port}" '
-    $1 == "LISTEN" && $4 ~ ("^\\[::\\]:" port "$") { found = 1 }
+  ss -6 -tln 2> /dev/null | awk -v port="${port}" '
+    $1 == "LISTEN" {
+      split($4, a, ":")
+      if (a[length(a)] == port) found = 1
+    }
     END { exit !found }
   '
 }
@@ -940,6 +946,7 @@ rollback_has_state() {
   [[ "${ROLLBACK_FAIL2BAN_TOUCHED}" == "true" ]] && return 0
   [[ -n "${ROLLBACK_SUDOERS_BACKUP}" || "${ROLLBACK_SUDOERS_CREATED}" == "true" ]] && return 0
   [[ "${ROLLBACK_SYSCTL_UNIT_CREATED}" == "true" ]] && return 0
+  [[ "${ROLLBACK_GAI_MODIFIED}" == "true" ]] && return 0
   [[ "${ROLLBACK_UFW_MODIFIED}" == "true" ]] && return 0
   [[ "${ROLLBACK_AUTOREVERT_INSTALLED}" == "true" ]] && return 0
   [[ "${ROLLBACK_USER_MODIFIED}" == "true" ]] && return 0
@@ -1043,6 +1050,16 @@ rollback_on_failure() {
     rm -f /etc/systemd/system/sysctl-hardening.service
     systemctl daemon-reload > /dev/null 2>&1 || true
     warn "Removed sysctl-hardening.service"
+  fi
+
+  if [[ "${ROLLBACK_GAI_MODIFIED}" == "true" ]]; then
+    if [[ -n "${ROLLBACK_GAI_BACKUP}" ]]; then
+      cp -p "${ROLLBACK_GAI_BACKUP}" /etc/gai.conf
+      rm -f "${ROLLBACK_GAI_BACKUP}"
+    else
+      rm -f /etc/gai.conf
+    fi
+    warn "Restored previous address selection policy"
   fi
 
   if [[ "${ROLLBACK_UFW_MODIFIED}" == "true" ]]; then
@@ -1382,8 +1399,9 @@ apply_sshd_hardening() {
   {
     cat << EOF
 Port ${SSH_PORT}
-AddressFamily inet
+AddressFamily any
 ListenAddress 0.0.0.0
+ListenAddress ::
 PermitRootLogin no
 AllowUsers ${SSH_USER}
 EOF
@@ -1447,20 +1465,21 @@ verify_sshd_port() {
   ss_listening_on_port "${port}" || err "sshd is not listening on port ${port}"
 }
 
-verify_ssh_ipv4_only() {
+verify_ssh_address_families() {
   local port="$1"
   local family=""
 
-  # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
-  ss_listening_on_ipv6_port "${port}" \
-    && err "sshd is listening on IPv6 [::]:${port} — firewall bypass risk"
-
   family="$(get_sshd_runtime_config | awk '/^addressfamily /{print $2; exit}')"
-  if [[ -n "${family}" && "${family}" != "inet" ]]; then
-    warn "sshd -T reports addressfamily '${family}' — no IPv6 listener on port ${port} (OK)"
+  [[ "${family}" == "any" ]] || err "sshd effective AddressFamily is not 'any'"
+  ss -4 -tln | grep -qE "[[:space:]]0\.0\.0\.0:${port}[[:space:]]" \
+    || err "sshd is not listening on IPv4 port ${port}"
+  if grep -q . /proc/net/if_inet6 2> /dev/null; then
+    # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+    ss_listening_on_ipv6_port "${port}" || err "sshd is not listening on IPv6 port ${port}"
+    ok "SSH accepts IPv4 and IPv6 (port ${port}/tcp)"
+  else
+    warn "No IPv6 interface is enabled — SSH is available over IPv4 only"
   fi
-
-  ok "SSH IPv4 only (port ${port}/tcp, no IPv6 listener)"
 }
 
 harden_ssh_stack() {
@@ -1480,9 +1499,10 @@ harden_ssh_stack() {
 
   rearm_lockout_autorevert
   info "Hardening SSH configuration..."
+  warn "⚠️ RISK: SSH will listen on IPv4 and IPv6; restarting it can interrupt access. Rollback: use the provider console to restore /etc/ssh from the backup or use --confirm-window."
   apply_sshd_hardening
   verify_sshd_port "${SSH_PORT}"
-  verify_ssh_ipv4_only "${SSH_PORT}"
+  verify_ssh_address_families "${SSH_PORT}"
   ok "SSH ready on port ${SSH_PORT}/tcp"
 }
 
@@ -1719,9 +1739,11 @@ restore_ufw_config() {
 
 ufw_limit_rule_present() {
   local port_rule="$1"
+  local rules=""
 
-  ufw status numbered 2> /dev/null \
-    | grep -qE "^[[:space:]]*\[[[:space:]]*[0-9]+\][[:space:]]+${port_rule}[[:space:]]+LIMIT"
+  rules="$(ufw status numbered 2> /dev/null)" || return 1
+  grep -qE "^[[:space:]]*\[[[:space:]]*[0-9]+\][[:space:]]+${port_rule}[[:space:]]+LIMIT" <<< "${rules}" \
+    && grep -qE "^[[:space:]]*\[[[:space:]]*[0-9]+\][[:space:]]+${port_rule}[[:space:]]+\(v6\)[[:space:]]+LIMIT" <<< "${rules}"
 }
 
 # Returns 2 for "already there" so the caller can still tell a real `ufw limit` failure
@@ -1747,6 +1769,38 @@ ensure_root_only_allow() {
   fi
   printf 'root\n' > "${file}"
   chmod 600 "${file}"
+}
+
+# A single precedence directive replaces glibc's entire default table.
+# Preserve other policy directives and restore the complete native-IPv6-first table.
+render_ipv6_preference() {
+  awk '$1 != "precedence"' "$1"
+  cat << 'EOF'
+precedence ::1/128 50
+precedence ::/0 40
+precedence 2002::/16 30
+precedence ::/96 20
+precedence ::ffff:0:0/96 10
+EOF
+}
+
+configure_ipv6_preference() {
+  local original=/dev/null policy="" addresses="" routes=""
+  if [[ -f /etc/gai.conf ]]; then
+    original=/etc/gai.conf
+    ROLLBACK_GAI_BACKUP="/etc/gai.conf.bak_${ROLLBACK_ID}"
+    cp -p /etc/gai.conf "${ROLLBACK_GAI_BACKUP}"
+  fi
+  policy="$(render_ipv6_preference "${original}")"
+  ROLLBACK_GAI_MODIFIED=true
+  printf '%s\n' "${policy}" > /etc/gai.conf
+  ok "Native IPv6 preferred by glibc address selection; IPv4 remains available"
+  addresses="$(ip -6 addr show scope global 2> /dev/null || true)"
+  routes="$(ip -6 route show default 2> /dev/null || true)"
+  if [[ -z "${addresses}" || -z "${routes}" ]]; then
+    warn "No global IPv6 address or default route — configure IPv6 with your provider before expecting IPv6 Internet traffic"
+  fi
+  info "Existing applications may need restarting to reload /etc/gai.conf; applications can override this preference"
 }
 
 # At boot systemd-sysctl leaves conf.{all,default}.log_martians at 0; the rest of
@@ -1913,6 +1967,14 @@ EOF
   backup_ufw_config
   ROLLBACK_UFW_MODIFIED=true
 
+  warn "⚠️ RISK: UFW will filter IPv4 and IPv6 and may block existing services. Rollback: restore the saved UFW state from the provider console or use --confirm-window."
+  # UFW must protect IPv6 as well as IPv4 before the final firewall is enabled.
+  sed -i '/^[[:space:]]*IPV6=/d' /etc/default/ufw
+  printf '\nIPV6=yes\n' >> /etc/default/ufw
+  if [[ "${ROLLBACK_UFW_WAS_ACTIVE}" == "true" ]]; then
+    ufw reload || err "Failed to reload UFW with IPv6 filtering enabled"
+  fi
+
   # Open the new port first. On a host where UFW is already active — the state
   # add_*_xrdp.sh leaves behind — `default deny incoming` takes effect the moment it
   # runs, and sshd has already moved off the old port by now. Opening afterwards
@@ -1946,6 +2008,8 @@ EOF
     warn "Besides ${SSH_PORT}/tcp, UFW still allows: ${UFW_EXTRA_OPEN_TARGETS//,/, } (kept on request or restricted to a source)"
   fi
   ok "UFW enabled (logging on)"
+
+  configure_ipv6_preference
 
   # --- Step 6: Fail2Ban ---
   sep
@@ -2007,7 +2071,7 @@ EOF
   # sysctl(8) — it can silently override 98-hardening.conf. Reproduced live: a VPS image
   # shipped /etc/sysctl.conf with tcp_syncookies=0 for BBR tuning, which won over our =1.
   # Re-apply our file last so it always wins, then verify the effective value rather than
-  # trust the write (same reasoning as verify_sshd_port / verify_ssh_ipv4_only).
+  # trust the write (same reasoning as verify_sshd_port / verify_ssh_address_families).
   sysctl -p /etc/sysctl.d/98-hardening.conf >> "${SYSCTL_LOG}" 2>&1 || true
   local effective_syncookies
   effective_syncookies="$(sysctl -n net.ipv4.tcp_syncookies)"
@@ -2036,6 +2100,7 @@ EOF
   discard_sshd_backup
   discard_fail2ban_backup
   discard_sudoers_backup
+  [[ -n "${ROLLBACK_GAI_BACKUP}" ]] && rm -f "${ROLLBACK_GAI_BACKUP}"
 
   sep
   info "Removing provider default user..."
