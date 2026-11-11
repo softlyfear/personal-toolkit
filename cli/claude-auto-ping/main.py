@@ -13,7 +13,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 MSK = ZoneInfo("Europe/Moscow")
-SLOTS = ("07:00", "12:01", "17:02", "22:03")  # MSK
+SLOTS = ("06:00", "11:01", "16:02", "21:03")  # MSK
 DEFAULT_MODEL = "haiku"  # Claude Code alias — always the latest haiku
 MESSAGE = "hi"
 TIMEOUT_S = 300

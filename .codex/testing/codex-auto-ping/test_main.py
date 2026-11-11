@@ -30,7 +30,7 @@ SUCCESS = response(
 
 @pytest.mark.parametrize(
     ("hour", "minute", "expected_day", "expected_hour", "expected_minute"),
-    [(6, 59, 3, 7, 0), (7, 0, 3, 12, 1), (12, 1, 3, 17, 2), (17, 2, 3, 22, 3), (22, 3, 4, 7, 0)],
+    [(5, 59, 3, 6, 0), (6, 0, 3, 11, 1), (11, 1, 3, 16, 2), (16, 2, 3, 21, 3), (21, 3, 4, 6, 0)],
 )
 def test_next_slot_is_strictly_in_the_future(
     hour, minute, expected_day, expected_hour, expected_minute

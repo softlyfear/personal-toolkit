@@ -4,7 +4,7 @@ A Claude subscription counts usage in **5-hour windows**, and a window starts wi
 This tool sends Claude one short message four times a day, so a fresh window is already running when you
 sit down to work.
 
-- Sends at **07:00, 12:01, 17:02, 22:03 Moscow time**, whatever time zone the server is in.
+- Sends at **06:00, 11:01, 16:02, 21:03 Moscow time**, whatever time zone the server is in.
 - Runs in the background on a Linux server and starts again by itself after a reboot.
 - Uses your Claude subscription. You don't need an API key or root.
 
@@ -52,7 +52,7 @@ It sends a test message, sets up the background service and checks it. A success
 [OK]    check: unit enabled
 [OK]    check: unit active
 [OK]    check: linger enabled (survives logout and reboot)
-[OK]    check: schedule armed — next ping 22.10 22:03 MSK
+[OK]    check: schedule armed — next ping 22.10 21:03 MSK
 ```
 
 That's it. You can close the SSH session now.
@@ -72,7 +72,7 @@ journalctl --user -u claude-auto-ping -n 20 --no-pager
 | You see                     | Meaning                                                    |
 | --------------------------- | ---------------------------------------------------------- |
 | `window opened in 3.9s`     | A message went through and a new window has started.       |
-| `next ping 22.10 22:03 MSK` | Waiting for the next send time.                            |
+| `next ping 22.10 21:03 MSK` | Waiting for the next send time.                            |
 | `attempt 1/3 failed`        | A temporary error. It retries in 2 minutes, up to 3 times. |
 | `login is dead, no retry`   | The token stopped working. See below.                      |
 | `slot missed`               | This send was lost. The next one is still scheduled.       |
@@ -117,7 +117,7 @@ Change them at the top of `~/.local/share/claude-auto-ping/main.py`, then run
 
 | What                 | Where                       | Default                                  |
 | -------------------- | --------------------------- | ---------------------------------------- |
-| Send times (MSK)     | `SLOTS`                     | `07:00, 12:01, 17:02, 22:03`             |
+| Send times (MSK)     | `SLOTS`                     | `06:00, 11:01, 16:02, 21:03`             |
 | Model                | `--model` / `DEFAULT_MODEL` | `haiku`, which is always the latest one  |
 | Message text         | `MESSAGE`                   | `hi`                                     |
 | Token file           | `--token-file`              | `~/.config/claude-auto-ping/oauth-token` |

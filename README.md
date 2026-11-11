@@ -198,7 +198,7 @@ Full reference — [`cli/README.md`](cli/README.md)
 
 ### claude-auto-ping
 
-Pings Claude Code on a schedule (MSK: `07:00` · `12:01` · `17:02` · `22:03`) — each message opens a new
+Pings Claude Code on a schedule (MSK: `06:00` · `11:01` · `16:02` · `21:03`) — each message opens a new
 5-hour session window. `uv` + venv · no API key · auto-start via a systemd user unit.
 
 **Install** — as your normal user, never root. Same command twice: the first run installs the tools and

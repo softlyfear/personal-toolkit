@@ -16,7 +16,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 MSK = ZoneInfo("Europe/Moscow")
-SLOTS = ("07:00", "12:01", "17:02", "22:03")
+SLOTS = ("06:00", "11:01", "16:02", "21:03")
 DEFAULT_MODEL = "gpt-6-luna"
 MESSAGE = "hi"
 TIMEOUT_S = 300

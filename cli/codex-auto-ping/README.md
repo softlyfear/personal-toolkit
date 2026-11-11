@@ -1,6 +1,6 @@
 # codex-auto-ping
 
-Sends Codex CLI a short message at **07:00, 12:01, 17:02 and 22:03 Moscow time**, matching
+Sends Codex CLI a short message at **06:00, 11:01, 16:02 and 21:03 Moscow time**, matching
 `claude-auto-ping`. Uses your saved **ChatGPT login**, without an API key or root.
 
 Runs as a systemd user service on Ubuntu (latest LTS). Logs show whether a request completed;
