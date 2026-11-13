@@ -13,16 +13,15 @@ Points that are easy to break:
   resolves the project directory from `BASH_SOURCE[0]`. It is Bash, so it is inside `.codex/lint.sh`.
   It writes `PDFPREP_HOME` into the generated `~/.local/bin/pdf-prep` launcher; that is what makes
   `task/`/`result/` resolve from any working directory.
-- `torch`/`torchvision` live in four mutually exclusive dependency groups (`cpu`, `cuda`,
-  `rocm-linux`, `rocm-windows`), each pinned to its own index in `[tool.uv.sources]`. They are listed
+- `torch`/`torchvision` live in three mutually exclusive dependency groups (`cpu`, `cuda`,
+  `rocm-linux`), each pinned to its own index in `[tool.uv.sources]`. They are listed
   at all only because sources apply to **direct** dependencies — as transitive deps of `easyocr` the
   pin is ignored and PyPI's CUDA wheels land whatever the machine has. `cpu` is the default group, so
   a bare `uv run` is safe; a GPU build survives only because the launcher that `install.sh` writes passes
   `--no-default-groups --group <build>` — any `uv run` without those flags re-syncs to `cpu`.
   `install.sh` picks the build from the hardware and then probes convolution and attention on the
-  device, falling back to `cpu`. `rocm-windows` comes from AMD's flat index
-  (`repo.radeon.com`, Python 3.12 only), and its `rocm-sdk-*` deps are listed in the group for the
-  same direct-dependency reason. `ocr.py` picks the device at run time and moves to the CPU on a GPU
+  device, falling back to `cpu`. Windows AMD GPUs use the CPU group; do not restore the vulnerable
+  Windows/ROCm build. `ocr.py` picks the device at run time and moves to the CPU on a GPU
   `RuntimeError` (out of memory, a kernel ROCm lacks). A GPU reader that is already loaded is reused
   without re-checking free memory: its own allocation reads as "not free" and silently pushed every
   document after the first onto the CPU.

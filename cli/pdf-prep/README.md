@@ -33,8 +33,11 @@ probes the machine and picks one torch build, all of it inside `.venv`:
 | --- | --- | --- |
 | `cuda` | NVIDIA, driver with CUDA 13+, compute capability 7.5+ | several GB |
 | `rocm-linux` | Linux, Radeon RX 6800/6900, RX 7600+, RX 9000, Strix Halo | several GB |
-| `rocm-windows` | Windows, Radeon RX 7600+ / RX 9000 / PRO W7000+ (AMD's own wheels, Python 3.12) | several GB |
 | `cpu` | anything else, and the fallback | a few hundred MB |
+
+Windows AMD GPUs use the CPU build. Windows/ROCm support is disabled because
+the previous AMD index only provides a vulnerable torch build. When upgrading
+from that build, re-run `install.sh` to replace its environment and launcher.
 
 A matching GPU is only a candidate: after the install the build must run a convolution and attention on
 the device, or the installer falls back to `cpu`. `PDFPREP_TORCH=cpu` skips the probe. The choice is

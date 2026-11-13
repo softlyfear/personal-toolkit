@@ -11,7 +11,7 @@
 # Requires: bash 4+, a network connection for the Python package index; never root
 # OCR runs on the GPU when this machine has one torch supports: the script probes the GPU,
 # installs the matching torch build into .venv, checks it on the device, and falls back to
-# the CPU build when any step fails. Builds: cuda | rocm-linux | rocm-windows | cpu.
+# the CPU build when any step fails. Builds: cuda | rocm-linux | cpu.
 # Uninstall: rm ~/.local/bin/pdf-prep && rm -rf <project>/.venv
 #
 set -euo pipefail
@@ -26,15 +26,13 @@ readonly BIN_DIR="${PDFPREP_BIN_DIR:-${HOME}/.local/bin}"
 readonly UV_INSTALLER_URL="https://astral.sh/uv/install.sh"
 # Files that must sit next to this script for the install to make sense
 readonly REQUIRED_FILES=("pyproject.toml" "src/pdfprep/cli.py" "config.example.toml")
-readonly TORCH_BUILDS=("cpu" "cuda" "rocm-linux" "rocm-windows")
+readonly TORCH_BUILDS=("cpu" "cuda" "rocm-linux")
 # The cuda group ships CUDA 13.2 wheels: they need a CUDA 13 driver (R580+) and sm_75+
 readonly MIN_CUDA_MAJOR=13
 readonly MIN_COMPUTE_CAP=75
 # gfx_target_version of the Radeon GPUs ROCm 7.2 supports: RX 6800/6900, RX 7600-7900,
 # Strix Halo, RX 9060/9070. A Ryzen iGPU (gfx1036, gfx1103) is an AMD GPU too and is excluded.
 readonly ROCM_LINUX_TARGETS=" 100300 110000 110001 110002 115001 120000 120001 "
-# AMD's Windows wheels cover RDNA3 and RDNA4 cards
-readonly ROCM_WINDOWS_NAME_RE='Radeon.*(RX[[:space:]]*(7[6-9][0-9]{2}|9[0-9]{3})|PRO[[:space:]]*W[79][0-9]{3}|8060S)'
 
 # =============================================================================
 # UI helpers
@@ -208,23 +206,6 @@ amd_linux_supported() {
   return 1
 }
 
-amd_windows_supported() {
-  local names="" name=""
-
-  command -v powershell.exe > /dev/null 2>&1 || return 1
-  # shellcheck disable=SC2016 # $_ is PowerShell's, it must reach powershell.exe unexpanded
-  names="$(powershell.exe -NoProfile -NonInteractive -Command \
-    'Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name }' 2> /dev/null)" \
-    || return 1
-  while read -r name; do
-    if [[ "${name}" =~ ${ROCM_WINDOWS_NAME_RE} ]]; then
-      info "GPU: ${name}"
-      return 0
-    fi
-  done <<< "${names//$'\r'/}"
-  return 1
-}
-
 # Prints the torch build to try on this machine. A match is only a candidate:
 # probe_gpu_build confirms it on the device after the install.
 detect_torch_build() {
@@ -246,8 +227,6 @@ detect_torch_build() {
     printf 'cuda\n'
   elif [[ "${platform}" == "linux" ]] && amd_linux_supported; then
     printf 'rocm-linux\n'
-  elif [[ "${platform}" == "windows" ]] && amd_windows_supported; then
-    printf 'rocm-windows\n'
   else
     printf 'cpu\n'
   fi
@@ -259,11 +238,8 @@ build_flags() {
   local -n flags_out="$1"
   local build="$2"
 
+  # shellcheck disable=SC2034 # nameref assignment populates the caller's array
   flags_out=("--no-default-groups" "--group" "${build}")
-  # AMD publishes its Windows wheels for Python 3.12 only
-  if [[ "${build}" == "rocm-windows" ]]; then
-    flags_out+=("--python" "3.12")
-  fi
 }
 
 sync_build() {
