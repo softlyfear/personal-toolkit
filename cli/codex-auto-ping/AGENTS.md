@@ -20,4 +20,4 @@ large built-in coding prompt. Keep the installer smoke test on `main.py --once` 
 cannot diverge. A successful ping needs an assistant message and a completed turn, not just exit 0.
 Auth failures skip retries. Do not claim a ping resets or guarantees a new subscription window.
 
-Tests: `.codex/testing/codex-auto-ping/`; run them explicitly as documented in README.md.
+Tests: `.opencode/testing/codex-auto-ping/`; run them explicitly as documented in README.md.

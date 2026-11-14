@@ -90,7 +90,7 @@ No service is installed just by cloning this project or running `--once`.
 From the repository root, run the additional Python tests and the shared gate:
 
 ```bash
-uv run --project cli/codex-auto-ping --with pytest pytest -q .codex/testing/codex-auto-ping
-uvx ruff check .codex/testing/codex-auto-ping
-bash .codex/lint.sh
+uv run --project cli/codex-auto-ping --with pytest pytest -q .opencode/testing/codex-auto-ping
+uvx ruff check .opencode/testing/codex-auto-ping
+bash .opencode/lint.sh
 ```

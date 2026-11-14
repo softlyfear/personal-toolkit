@@ -1,0 +1,6 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  // Project instructions are the AGENTS.md files. OpenCode loads them automatically.
+  // Skills in .opencode/skills/ and the guard plugin in .opencode/plugins/guard/ load automatically.
+  // The previous project agent config had no MCP servers and no runtime settings to transfer.
+}

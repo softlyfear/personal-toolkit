@@ -10,7 +10,7 @@ flat, no per-document subfolders; every output name carries the source slug. Unl
 Points that are easy to break:
 
 - `install.sh` runs **from a copy on disk only** — it refuses a `wget`-piped invocation because it
-  resolves the project directory from `BASH_SOURCE[0]`. It is Bash, so it is inside `.codex/lint.sh`.
+  resolves the project directory from `BASH_SOURCE[0]`. It is Bash, so it is inside `.opencode/lint.sh`.
   It writes `PDFPREP_HOME` into the generated `~/.local/bin/pdf-prep` launcher; that is what makes
   `task/`/`result/` resolve from any working directory.
 - `torch`/`torchvision` live in three mutually exclusive dependency groups (`cpu`, `cuda`,

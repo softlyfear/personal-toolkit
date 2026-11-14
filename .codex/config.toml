@@ -1,2 +1,0 @@
-# Runtime permissions are configured by the user or session.
-# Shared lint and test tooling stays in .codex/; Codex skills live in .agents/skills/.

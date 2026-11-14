@@ -12,7 +12,7 @@
 | **[`dev-tools/`](dev-tools/)**           | `devsetup` installer, FastAPI `Makefile` template      | [README](dev-tools/README.md)               |
 | **[`cli/`](cli/)**                       | `claude-auto-ping`, `pdf-prep` — small Python tools    | [README](cli/README.md)                     |
 | **[`web3/`](web3/)**                     | Cosmos and Ethereum node helpers · unmaintained        | [README](web3/README.md)                    |
-| `.codex/`                               | Tooling only: the quality gate and all tests           | [RULES.md](.codex/RULES.md)                |
+| `.opencode/`                               | OpenCode skills, guard plugin, quality gate and tests  | [RULES.md](.opencode/RULES.md)                |
 
 ## Quick start
 
@@ -32,15 +32,15 @@ bash <(wget -qO- https://raw.githubusercontent.com/user/personal-toolkit/main/se
 
 ## Contributing
 
-Bash standards for this repository are fixed in [`.codex/RULES.md`](.codex/RULES.md). Before any change is
+Bash standards for this repository are fixed in [`.opencode/RULES.md`](.opencode/RULES.md). Before any change is
 considered done:
 
 ```bash
-bash .codex/lint.sh    # shfmt -d, then shellcheck -x -S style, then bats .codex/testing/unit/
+bash .opencode/lint.sh    # shfmt -d, then shellcheck -x -S style, then bats .opencode/testing/unit/
 ```
 
 Requires `shfmt`, `shellcheck`, `bats` and `git`. Test layers and the list of things only a real VPS can
-verify are described in [`.codex/testing/unit/README.md`](.codex/testing/unit/README.md).
+verify are described in [`.opencode/testing/unit/README.md`](.opencode/testing/unit/README.md).
 
 ---
 

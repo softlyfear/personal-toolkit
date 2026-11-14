@@ -1,13 +1,13 @@
 # AGENTS.md
 
-This file provides guidance to Codex when working with code in this repository.
+This file provides project guidance for agents working in this repository. OpenCode loads it automatically.
 
 ## What this repo is
 
 A collection of standalone Bash scripts for provisioning/hardening Ubuntu servers and setting up dev
 environments. The shipped scripts have no build step — each is a self-contained CLI tool meant to be run
 directly, often via `bash <(wget -qO- <raw-github-url>)` without cloning the repo first. Tooling and tests
-live under `.codex/` (see "Quality gate" below).
+live under `.opencode/` (see "Quality gate" below).
 
 ## OS scope: Ubuntu (latest LTS) only
 
@@ -28,8 +28,8 @@ cli/                small personal Python CLIs (uv-managed), e.g. claude-auto-pi
 web3/               Cosmos/Ethereum node helpers — no feature work, see "web3/" note below
 ```
 
-Test tooling for `configuring_server.sh` lives in `.codex/testing/own-script/` (shared development tooling, not part of
-the shipped repo content) — see "All tests live under `.codex/testing/`" below.
+Test tooling for `configuring_server.sh` lives in `.opencode/testing/own-script/` (shared development tooling, not part of
+the shipped repo content) — see "All tests live under `.opencode/testing/`" below.
 
 **Priority:** `server-scripts/` and `dev-tools/` are the actively maintained parts of this repo.
 **`server-scripts/configuring_server.sh` is the most important script here** — it is the largest, the riskiest
@@ -47,18 +47,21 @@ This is the repository workflow chosen by the user, who works alone and reviews 
 before publication. It does not override applicable platform instructions.
 
 **One finished task, one commit.** Never intermediate or fix-up commits splitting
-one task; run `bash .codex/lint.sh` before committing.
+one task; run `bash .opencode/lint.sh` before committing.
 
 ## Language convention
 
 User-facing repository documentation and script output are English.
 
-## Codex integration and shared tooling
+## OpenCode and shared tooling
 
-- `AGENTS.md` contains Codex project guidance; `.codex/` holds its config and hook entry point.
-- `.agents/skills/` holds Codex skills, including the Docker suite runner.
-- `.codex/RULES.md`, `.codex/lint.sh` and `.codex/testing/` hold the rules, gate and tests.
-- `.codex/hooks/guard.sh` implements the configuration guard and commit gate.
+OpenCode loads this file automatically. Project settings live in `opencode.jsonc`.
+Do not duplicate instructions or skills that OpenCode already discovers.
+
+- `.opencode/skills/` holds project skills, including the Docker suite runner.
+- `.opencode/RULES.md`, `.opencode/lint.sh` and `.opencode/testing/` are the quality gate and tests.
+- `.opencode/hooks/guard.sh` is the tripwire. `.opencode/plugins/guard/` calls it from OpenCode's
+  permission hook. This repository had no MCP servers to transfer; do not add one unless a task needs it.
 
 ## Critical constraint: scripts are curl/wget-piped, not cloned
 
@@ -109,14 +112,14 @@ Directory-specific constraints:
   and the `configuring_server.sh` architecture notes (rollback, UFW ownership, confirm window). **Read
   it before any change to `configuring_server.sh`.**
 - `dev-tools/AGENTS.md` — why `install_uv()` is not checksum-pinned; the `Makefile` is a template.
-- `.codex/testing/AGENTS.md` — the Docker scenario suites, run through the `docker-suite` skill.
+- `.opencode/testing/AGENTS.md` — the Docker scenario suites, run through the `docker-suite` skill.
 - `cli/claude-auto-ping/AGENTS.md`, `cli/pdf-prep/AGENTS.md` — their Python CLI constraints.
 - `cli/codex-auto-ping/AGENTS.md` — the Codex subscription ping service and its isolated requests.
 - `web3/AGENTS.md` — pinned upstream hashes, for when the user does name a `web3/` file.
 
-## Quality gate: .codex/RULES.md + .codex/lint.sh
+## Quality gate: .opencode/RULES.md + .opencode/lint.sh
 
-**`.codex/RULES.md` is binding for every Bash change here — read it before editing a
+**`.opencode/RULES.md` is binding for every Bash change here — read it before editing a
 script.** It fixes the prologue (`set -euo pipefail` + `IFS=$'\n\t'`), quoting, `local`,
 stdout-vs-stderr, traps, naming, the suppression policy, and the tooling set (shellcheck, shfmt,
 bats-core, shellharden, checkbashisms — nothing else).
@@ -124,35 +127,28 @@ bats-core, shellharden, checkbashisms — nothing else).
 Run the gate before considering any change done:
 
 ```bash
-bash .codex/lint.sh
+bash .opencode/lint.sh
 ```
 
 It executes, in this order and stopping at the first failure: `shfmt -i 2 -ci -bn -sr -d`,
-`shellcheck -x -S style`, `bats .codex/testing/unit/`, then `ruff` on `cli/` and
-`pytest .codex/testing/pdf-prep/`. The pytest run uses its own `cli/pdf-prep/.venv-test` (CPU
+`shellcheck -x -S style`, `bats .opencode/testing/unit/`, then `ruff` on `cli/` and
+`pytest .opencode/testing/pdf-prep/`. The pytest run uses its own `cli/pdf-prep/.venv-test` (CPU
 torch): a plain `uv run` would re-sync the launcher's `.venv` away from its GPU build. Config lives in `.shellcheckrc` (`enable=all`),
 `.editorconfig`, `.gitattributes`. The file list comes from `git ls-files --cached --others`, so a
 newly created script is checked before it is ever staged. The only exclusion is the vendored
-`.codex/testing/unit/test_helper/`; `web3/` is included.
+`.opencode/testing/unit/test_helper/`; `web3/` is included.
 
-**Commit gate and configuration guards.** `.codex/hooks.json` registers the Codex entry point
-`.codex/hooks/guard.sh` for Bash and `apply_patch` events. The shared guard runs `.codex/lint.sh`
-before a commit, blocks destructive Git commands and protects gate/hook configuration, including
-`.codex/config.toml` and `.codex/hooks.json`. This is a tripwire for common operations, not a shell
-parser or a complete security boundary. It checks the working tree, not only staged files.
+**Commit gate.** `.opencode/plugins/guard/` calls `guard.sh` before a shell or edit permission is
+allowed. A `git commit` runs `.opencode/lint.sh` first and is denied while the gate fails.
+Destructive Git and writes to protected gate files are denied unless the shell command includes
+`ALLOW_DESTRUCTIVE_GIT=1` or `ALLOW_CONFIG_EDIT=1` after the user has explicitly authorized that
+action. Those prefixes are how an already-authorized command gets through the tripwire; they are
+not a substitute for asking. The check is a tripwire, not a shell parser, and it looks at the
+working tree, not only staged files. If the plugin is not loaded, the tripwire is not enforced:
+still run `bash .opencode/lint.sh` before committing. `.github/workflows/gate.yml` runs the same
+gate on every push; tool hashes and action commits remain pinned there.
 
-Changes to protected configuration or destructive Git require explicit user authorization. When the
-user has already requested that change, do not ask again: use `ALLOW_CONFIG_EDIT=1` or
-`ALLOW_DESTRUCTIVE_GIT=1` on the authorized shell command. A `deny` response blocks the tool call;
-it does not open an approval prompt.
-
-Codex requires hook definitions to be reviewed and trusted before they run. Inspect `/hooks` after
-installation or a definition change; project trust alone does not establish hook trust. Do not claim
-that enforcement is active without verifying it. Always run the gate before committing, even when
-hooks are unavailable. `.github/workflows/gate.yml` runs the same gate on every push; tool hashes
-and action commits remain pinned there.
-
-Two things that are easy to get wrong and are already documented in `.codex/RULES.md`:
+Two things that are easy to get wrong and are already documented in `.opencode/RULES.md`:
 
 - **Suppressions.** Never global in `.shellcheckrc`. Per-line `# shellcheck disable=SCxxxx # reason`
   with the reason on the same line. ShellCheck rejects a directive in front of `elif`, a `case`
@@ -161,7 +157,7 @@ Two things that are easy to get wrong and are already documented in `.codex/RULE
 - **`IFS=$'\n\t'` has teeth.** `read -a` splits on `IFS`, so parsing space-separated values such as
   `SSH_CONNECTION` needs an explicit `IFS=' ' read -r -a ...` on that command. Sourcing a script
   from bats leaks its `IFS` into the runner and makes failing tests vanish from the report —
-  `.codex/testing/unit/helper.bash` restores the default.
+  `.opencode/testing/unit/helper.bash` restores the default.
 
 ### Library docs: Context7
 
@@ -181,39 +177,39 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
 fi
 ```
 
-so `.codex/testing/unit/*.bats` can `source` it for its functions without running anything. Keep source-time side
+so `.opencode/testing/unit/*.bats` can `source` it for its functions without running anything. Keep source-time side
 effects out of file scope — that includes trap registration (`configuring_server.sh` registers
 `trap rollback_on_failure EXIT` inside `main`, not at file scope, for exactly this reason).
 
-### Repo root is for shipped scripts only; tooling lives under `.codex/`
+### Repo root is for shipped scripts only; tooling lives under `.opencode/`
 
 The root holds what actually gets delivered (`server-scripts/`, `dev-tools/`, `web3/`), the docs,
 and the tool dotfiles that must sit there (`.shellcheckrc`, `.editorconfig`, `.gitattributes`,
-and `.github/workflows/`, the only place GitHub reads workflows from).
-Shared gate and test tooling stays under `.codex/`; Codex configuration lives under `.codex/`
-and Codex skills under `.agents/skills/`. **Don't add `scripts/`, `test/`, or any other tooling directory to the
+`opencode.jsonc`, and `.github/workflows/`, the only place GitHub reads workflows from).
+Shared gate and test tooling stays under `.opencode/`. OpenCode project config is `opencode.jsonc`;
+skills stay in `.opencode/skills/`. **Don't add `scripts/`, `test/`, or any other tooling directory to the
 root.**
 
-### All tests live under `.codex/testing/` — never in a top-level `test/`
+### All tests live under `.opencode/testing/` — never in a top-level `test/`
 
-One root for everything test-related: `.codex/testing/unit/` holds the bats unit tests (plus the
-vendored `test_helper/`), `.codex/testing/pdf-prep/` the pytest suite for `cli/pdf-prep`, and the
+One root for everything test-related: `.opencode/testing/unit/` holds the bats unit tests (plus the
+vendored `test_helper/`), `.opencode/testing/pdf-prep/` the pytest suite for `cli/pdf-prep`, and the
 other sibling directories hold the Docker scenario suites, each named after the script it exercises.
 The pdf-prep tests build their PDFs in code — the user's documents never enter the repository — and
 each one reproduces a bug a real document once caused; keep new ones that way.
 
-`.codex/testing/unit/*.bats` covers pure logic only. Anything that mutates the system (apt, systemctl, ufw,
-userdel, sshd config) belongs to the Docker suites. `.codex/testing/unit/README.md` holds
+`.opencode/testing/unit/*.bats` covers pure logic only. Anything that mutates the system (apt, systemctl, ufw,
+userdel, sshd config) belongs to the Docker suites. `.opencode/testing/unit/README.md` holds
 the split and, importantly, the list of things **no** container can prove (real SSH lockout, UFW
 packet filtering, Fail2Ban actually banning, host sysctl, reboot persistence, xrdp sessions) —
 those need a real VPS.
 
-In Codex, launch every suite through the `docker-suite` skill (`.agents/skills/docker-suite/`); the
-harness itself is described in `.codex/testing/AGENTS.md`.
+Launch every suite through the `docker-suite` skill (`.opencode/skills/docker-suite/`); the
+harness itself is described in `.opencode/testing/AGENTS.md`.
 
 ## `cli/`
 
-Python, not Bash, so `.codex/RULES.md` doesn't apply; `.codex/lint.sh` checks it in its last stage
+Python, not Bash, so `.opencode/RULES.md` doesn't apply; `.opencode/lint.sh` checks it in its last stage
 (`ruff format --check`, `ruff check`, and pdf-prep's pytest suite). Each tool is a uv project (`pyproject.toml` + `uv.lock`);
 `.venv`, `__pycache__`, `*.log` and `*.log.[0-9]` are already gitignored — the rotated-log rule is separate because
 `*.log` does not match `ping.log.1`. These run from a clone, not `wget`-piped, so the single-file
@@ -224,13 +220,13 @@ constraint doesn't bind them — except `cli/claude-auto-ping/install.sh`, which
 
 A local PDF toolbox (compress / split for a Claude Project / translate). Its internals — torch
 builds, compression checks, how sections are found — are in `cli/pdf-prep/AGENTS.md`; read it
-before changing anything there. Its tests are `.codex/testing/pdf-prep/` (pytest, part of the gate).
+before changing anything there. Its tests are `.opencode/testing/pdf-prep/` (pytest, part of the gate).
 
 ## web3/ (out of scope for features, still inside the gate)
 
 `web3/cosmos_node_commands.sh` (source-only Cosmos validator helpers) and `web3/geth+beacon.sh` (Sepolia
 geth + Prysm beacon setup) are not currently maintained. **Ignore this directory by default** — don't read,
 review, refactor, or "fix while you're in there" unless the user explicitly asks about a file in `web3/` by
-name. That is a rule about *feature* work: both files are inside `.codex/lint.sh`, pass
+name. That is a rule about *feature* work: both files are inside `.opencode/lint.sh`, pass
 `shfmt` and `shellcheck -S style` clean, and any edit here must keep them passing. They have no bats or
 Docker suite, so the gate is the only automated check they get.

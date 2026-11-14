@@ -55,12 +55,12 @@ its four application files; a wget-piped installer downloads them without clonin
 
 ## Checks
 
-`.codex/lint.sh` checks every CLI's Python formatting and lint, the Bash installers, and the
-`pdf-prep` pytest suite. `.codex/RULES.md` applies to the Bash files. Run `codex-auto-ping`'s
+`.opencode/lint.sh` checks every CLI's Python formatting and lint, the Bash installers, and the
+`pdf-prep` pytest suite. `.opencode/RULES.md` applies to the Bash files. Run `codex-auto-ping`'s
 additional Python tests explicitly as documented in its README.
 
 ```bash
 uvx ruff format --check
 uvx ruff check
-bash .codex/lint.sh      # covers cli/*/install.sh
+bash .opencode/lint.sh      # covers cli/*/install.sh
 ```
