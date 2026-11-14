@@ -732,7 +732,18 @@ port_in_use() {
 }
 
 get_sshd_runtime_config() {
-  sshd -T 2> /dev/null || true
+  # OpenSSH 10.2 prints `sshd -T` keywords in lowercase. OpenSSH 10.5 prints
+  # canonical case (`PermitRootLogin`). Callers match the lowercase form.
+  sshd -T 2> /dev/null | tr '[:upper:]' '[:lower:]' || true
+}
+
+# OpenSSH 10.5 dropped the Debian GSSAPIAuthentication keyword. `sshd -t` only
+# warns and still exits 0, so the line must be left out when this binary does
+# not advertise the keyword. `get_sshd_runtime_config` is already lowercased.
+sshd_supports_gssapi() {
+  local cfg=""
+  cfg="$(get_sshd_runtime_config)"
+  grep -qE '^gssapiauthentication[[:space:]]+' <<< "${cfg}"
 }
 
 # /run/sshd is ssh.service's RuntimeDirectory=, so systemd deletes it when the unit is
@@ -1377,6 +1388,7 @@ discard_sshd_backup() {
 
 apply_sshd_hardening() {
   local -a auth_lines=()
+  local gssapi_line=""
   backup_sshd_config
   # Leftover from older versions of this script — hardening now lives in 00-hardening.conf
   rm -f "${SSHD_DROPIN_DIR}/99-hardening.conf"
@@ -1396,6 +1408,16 @@ apply_sshd_hardening() {
     )
   fi
 
+  # Probe before the drop-in exists, so a leftover unsupported line cannot
+  # hide the keyword. /run/sshd must exist or `sshd -T` aborts empty. Stay
+  # outside the redirection below: `sshd -T` writes the whole config to stdout.
+  # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+  ensure_sshd_privsep_dir || err "Cannot create ${SSHD_PRIVSEP_DIR}, required by sshd -t"
+  # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+  if sshd_supports_gssapi; then
+    gssapi_line='GSSAPIAuthentication no'
+  fi
+
   {
     cat << EOF
 Port ${SSH_PORT}
@@ -1406,10 +1428,11 @@ PermitRootLogin no
 AllowUsers ${SSH_USER}
 EOF
     printf '%s\n' "${auth_lines[@]}"
+    printf '%s\n' \
+      'KbdInteractiveAuthentication no' \
+      'HostbasedAuthentication no'
+    [[ -n "${gssapi_line}" ]] && printf '%s\n' "${gssapi_line}"
     cat << 'EOF'
-KbdInteractiveAuthentication no
-HostbasedAuthentication no
-GSSAPIAuthentication no
 PermitEmptyPasswords no
 UsePAM yes
 X11Forwarding no
@@ -1430,6 +1453,7 @@ EOF
   [[ "${SSH_PORT}" != "22" ]] && handle_ssh_socket
 
   info "Validating sshd config..."
+  # handle_ssh_socket stops ssh.socket, and systemd then removes RuntimeDirectory=/run/sshd.
   # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
   ensure_sshd_privsep_dir || err "Cannot create ${SSHD_PRIVSEP_DIR}, required by sshd -t"
   sshd -t || err "sshd config validation failed"

@@ -74,7 +74,15 @@ verify_common_hardening() {
   assert_match "PermitEmptyPasswords no" "${cfg}" '^permitemptypasswords no$' || rc=1
   assert_match "KbdInteractiveAuthentication no" "${cfg}" '^kbdinteractiveauthentication no$' || rc=1
   assert_match "HostbasedAuthentication no" "${cfg}" '^hostbasedauthentication no$' || rc=1
-  assert_match "GSSAPIAuthentication no" "${cfg}" '^gssapiauthentication no$' || rc=1
+  # OpenSSH 10.5 has no GSSAPIAuthentication keyword. When the effective
+  # config advertises it, the script must force it off; otherwise the drop-in
+  # must not contain the unsupported line.
+  if grep -qE '^gssapiauthentication[[:space:]]+' <<< "${cfg}"; then
+    assert_match "GSSAPIAuthentication no" "${cfg}" '^gssapiauthentication no$' || rc=1
+  else
+    assert_shell "sshd has no GSSAPIAuthentication keyword, so the drop-in omits it" \
+      "! docker exec ${name} grep -q '^GSSAPIAuthentication ' /etc/ssh/sshd_config.d/00-hardening.conf" || rc=1
+  fi
   assert_match "X11Forwarding no" "${cfg}" '^x11forwarding no$' || rc=1
   assert_match "AllowAgentForwarding no" "${cfg}" '^allowagentforwarding no$' || rc=1
   assert_match "AllowTcpForwarding no" "${cfg}" '^allowtcpforwarding no$' || rc=1
@@ -113,7 +121,7 @@ verify_common_hardening() {
       assert_shell "drop-in disables ssh-rsa algorithms" \
         "docker exec ${name} grep -qF 'PubkeyAcceptedAlgorithms -ssh-rsa' /etc/ssh/sshd_config.d/00-hardening.conf" || rc=1
       assert_shell "effective PubkeyAcceptedAlgorithms has no ssh-rsa" \
-        "! docker exec ${name} sshd -T | grep '^pubkeyacceptedalgorithms ' | grep -q 'ssh-rsa'" || rc=1
+        "! docker exec ${name} sshd -T | tr '[:upper:]' '[:lower:]' | grep '^pubkeyacceptedalgorithms ' | grep -q 'ssh-rsa'" || rc=1
       assert_shell "authorized_keys non-empty for ${user}" \
         "docker exec ${name} test -s /home/${user}/.ssh/authorized_keys" || rc=1
       assert_shell "authorized_keys holds an ed25519 key" \
@@ -390,7 +398,7 @@ verify_confirm_window() {
   assert_shell "hardening-confirm leaves no dead units or helpers behind" \
     "docker exec ${name} bash -c '! test -e /etc/systemd/system/hardening-autorevert.timer && ! test -e /etc/systemd/system/hardening-autorevert.service && ! test -e /usr/local/sbin/hardening-autorevert'" || rc=1
   assert_shell "sshd still hardened after confirming" \
-    "docker exec ${name} sshd -T | grep -qE '^port 2244$'" || rc=1
+    "docker exec ${name} sshd -T | tr '[:upper:]' '[:lower:]' | grep -qE '^port 2244$'" || rc=1
   return "${rc}"
 }
 
@@ -404,11 +412,11 @@ verify_rollback_on_failure() {
     "docker exec ${name} cmp /root/gai-before.conf /etc/gai.conf" || rc=1
   assert_shell "UFW IPv6 setting restored exactly" \
     "docker exec ${name} cmp /root/ufw-default-before /etc/default/ufw" || rc=1
-  assert_shell "sshd port restored to 22" "docker exec ${name} sshd -T | grep -qE '^port 22$'" || rc=1
+  assert_shell "sshd port restored to 22" "docker exec ${name} sshd -T | tr '[:upper:]' '[:lower:]' | grep -qE '^port 22$'" || rc=1
   assert_shell "no hardening drop-in left behind" \
     "! docker exec ${name} test -e /etc/ssh/sshd_config.d/00-hardening.conf" || rc=1
   assert_shell "root login no longer forced off" \
-    "! docker exec ${name} sshd -T | grep -qE '^permitrootlogin no$'" || rc=1
+    "! docker exec ${name} sshd -T | tr '[:upper:]' '[:lower:]' | grep -qE '^permitrootlogin no$'" || rc=1
   assert_shell "ssh.socket unmasked again" \
     "! docker exec ${name} systemctl is-enabled ssh.socket 2>/dev/null | grep -q '^masked$'" || rc=1
   assert_shell "sudoers drop-in for tester19 removed" \

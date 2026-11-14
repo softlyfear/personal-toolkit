@@ -142,7 +142,10 @@ run_interactive() {
 
 # --- Assertions: run via docker exec against an already-started container ---
 
-sshd_effective() { docker exec "$1" sshd -T 2> /dev/null; }
+# OpenSSH 10.5 prints canonical keyword case. The assertions below match
+# the lowercase form that OpenSSH 10.2 prints and that configuring_server.sh
+# compares against.
+sshd_effective() { docker exec "$1" sshd -T 2> /dev/null | tr '[:upper:]' '[:lower:]'; }
 
 assert_match() {
   local desc="$1" haystack="$2" pattern="$3"
