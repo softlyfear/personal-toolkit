@@ -99,6 +99,47 @@ xrdp_scripts() {
   done < <(xrdp_scripts)
 }
 
+@test "parse_sshd_port accepts OpenSSH 10.5 canonical case" {
+  while read -r script; do
+    run bash -c "source '${REPO_ROOT}/${script}'; printf 'Port 2244\nAddressFamily any\n' | parse_sshd_port"
+    assert_success
+    assert_output "2244"
+    run bash -c "source '${REPO_ROOT}/${script}'; printf 'port 22\n' | parse_sshd_port"
+    assert_success
+    assert_output "22"
+  done < <(xrdp_scripts)
+}
+
+@test "valid_ipv4 rejects octets above 255 and keeps a normal address" {
+  while read -r script; do
+    run bash -c "source '${REPO_ROOT}/${script}'; valid_ipv4 203.0.113.10"
+    assert_success
+    run bash -c "source '${REPO_ROOT}/${script}'; valid_ipv4 999.999.999.999"
+    assert_failure
+    run bash -c "source '${REPO_ROOT}/${script}'; valid_ipv4 '203.0.113.10 '"
+    assert_failure
+    run bash -c "source '${REPO_ROOT}/${script}'; sanitize_ipv4_input $' 203.0.113.10 \r'"
+    assert_success
+    assert_output "203.0.113.10"
+  done < <(xrdp_scripts)
+}
+
+@test "ufw_has_open_ssh_rule ignores DENY and a v6-only line" {
+  local status_file="${BATS_TEST_TMPDIR}/ufw-status"
+  printf '%s\n' \
+    '[ 1] 2244/tcp                   DENY IN    Anywhere' \
+    '[ 2] 2244/tcp (v6)              ALLOW IN    Anywhere (v6)' \
+    '[ 3] 2244/tcp                   ALLOW OUT   Anywhere' \
+    '[ 4] 2244/tcp                   ALLOW IN    198.51.100.10' \
+    '[ 5] 22/tcp                     LIMIT IN    Anywhere' > "${status_file}"
+  while read -r script; do
+    run bash -c "source '${REPO_ROOT}/${script}'; ufw_has_open_ssh_rule 2244 < '${status_file}'"
+    assert_failure
+    run bash -c "source '${REPO_ROOT}/${script}'; ufw_has_open_ssh_rule 22 < '${status_file}'"
+    assert_success
+  done < <(xrdp_scripts)
+}
+
 @test "sourcing either script does not execute main" {
   while read -r script; do
     run bash -c "source '${REPO_ROOT}/${script}' && echo SOURCED"

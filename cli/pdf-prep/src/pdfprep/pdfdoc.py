@@ -71,10 +71,32 @@ def slugify(text: str, limit: int = 40) -> str:
     return (cleaned[:limit].rstrip("-")) or "untitled"
 
 
-def unique_slugs(paths: list[Path], root: Path) -> dict[Path, str]:
+def source_key(path: Path) -> str:
+    """Stable identity for a source file. Output ownership is compared against this."""
+    return str(path.resolve())
+
+
+def slug_owner(result_dir: Path, slug: str) -> str | None:
+    marker = result_dir / f"{slug}--source"
+    if not marker.is_file():
+        return None
+    text = marker.read_text(encoding="utf-8").strip()
+    return text or None
+
+
+def claim_slug(result_dir: Path, slug: str, source: Path) -> None:
+    result_dir.mkdir(parents=True, exist_ok=True)
+    (result_dir / f"{slug}--source").write_text(source_key(source) + "\n", encoding="utf-8")
+
+
+def unique_slugs(paths: list[Path], root: Path, result_dir: Path | None = None) -> dict[Path, str]:
     """Slug per source. result/ is flat and every output name starts with the slug, so two
     `manual.pdf` in different folders would overwrite each other's parts — and a re-run's
-    cleanup would delete the other's. Clashing names take their folder path into the slug."""
+    cleanup would delete the other's. Clashing names take their folder path into the slug.
+
+    A clash in a later, separate invocation is the same bug: `{slug}--source` records which
+    file owns that slug, and a different file is given a qualified slug instead of inheriting it.
+    """
     by_stem: dict[str, list[Path]] = {}
     for path in paths:
         by_stem.setdefault(slugify(path.stem), []).append(path)
@@ -91,6 +113,25 @@ def unique_slugs(paths: list[Path], root: Path) -> dict[Path, str]:
                 slug, suffix = f"{base}-{suffix}", suffix + 1
             used.add(slug)
             slugs[path] = slug
+    if result_dir is not None:
+        for path in paths:
+            slug = slugs[path]
+            owner = slug_owner(result_dir, slug)
+            if not owner or owner == source_key(path):
+                continue
+            qualified = slugify(str(path.relative_to(root).with_suffix("")), limit=60)
+            base, suffix = qualified, 2
+            used.discard(slug)
+            while qualified in used or (
+                (taken := slug_owner(result_dir, qualified)) is not None
+                and taken != source_key(path)
+            ):
+                qualified = f"{base}-{suffix}"
+                suffix += 1
+            used.add(qualified)
+            slugs[path] = qualified
+        for path, slug in slugs.items():
+            claim_slug(result_dir, slug, path)
     return slugs
 
 
@@ -103,7 +144,12 @@ def discover(task_dir: Path, scope: list[str] | None = None) -> list[Path]:
     """Every source PDF under task_dir, artifacts of earlier runs excluded."""
     if not task_dir.is_dir():
         raise PdfPrepError(f"Task directory does not exist: {task_dir}")
-    found = sorted(p for p in task_dir.rglob("*.pdf") if p.is_file() and not is_artifact(p))
+    # Linux globs are case-sensitive: rglob("*.pdf") silently skips Manual.PDF.
+    found = sorted(
+        p
+        for p in task_dir.rglob("*")
+        if p.is_file() and p.suffix.lower() == ".pdf" and not is_artifact(p)
+    )
     if not scope:
         return found
     wanted = [s.lower() for s in scope]

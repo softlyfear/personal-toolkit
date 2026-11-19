@@ -38,7 +38,7 @@ def _sources(cfg: Config, scope: list[str] | None) -> list[Path]:
 def _inspect_all(sources: list[Path], cfg: Config) -> tuple[dict[Path, DocInfo], list[str]]:
     infos: dict[Path, DocInfo] = {}
     skipped: list[str] = []
-    slugs = pdfdoc.unique_slugs(sources, cfg.task_dir)
+    slugs = pdfdoc.unique_slugs(sources, cfg.task_dir, cfg.result_dir)
     for source in sources:
         try:
             infos[source] = replace(pdfdoc.inspect(source), slug=slugs[source])
@@ -236,7 +236,7 @@ def cmd_compress(args, cfg: Config) -> int:
 def cmd_ocr(args, cfg: Config) -> int:
     sources = _sources(cfg, args.scope)
     failures = 0
-    slugs = pdfdoc.unique_slugs(sources, cfg.task_dir)
+    slugs = pdfdoc.unique_slugs(sources, cfg.task_dir, cfg.result_dir)
     for source in sources:
         slug = slugs[source]
         cfg.result_dir.mkdir(parents=True, exist_ok=True)

@@ -296,24 +296,37 @@ sync_dependencies() {
   printf 'cpu\n'
 }
 
+# An unquoted heredoc expands $ and backticks in the install path, so task/ and
+# result/ later resolve somewhere else while bash -n still succeeds.
+render_launcher() {
+  local project_dir="$1" uv_bin="$2" flag quoted="" line=""
+  shift 2
+  printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+  printf 'export PDFPREP_HOME=%q\n' "${project_dir}"
+  printf -v quoted '%q' "${uv_bin}"
+  line="exec ${quoted} run --project "
+  printf -v quoted '%q' "${project_dir}"
+  line+="${quoted}"
+  for flag in "$@"; do
+    printf -v quoted '%q' "${flag}"
+    line+=" ${quoted}"
+  done
+  line+=' pdf-prep "$@"'
+  printf '%s\n' "${line}"
+}
+
 # The launcher pins PDFPREP_HOME so task/ and result/ resolve from any working directory.
 install_launcher() {
-  local project_dir="$1" build="$2" uv_bin="" tmp_launcher="" flags=() flag_text=""
+  local project_dir="$1" build="$2" uv_bin="" tmp_launcher="" flags=()
 
   uv_bin="$(command -v uv)"
   build_flags flags "${build}"
-  printf -v flag_text '%s ' "${flags[@]}"
   mkdir -p "${BIN_DIR}" || err "Cannot create ${BIN_DIR}"
   tmp_launcher="$(mktemp)"
   # Self-clearing: a RETURN trap otherwise fires again when the caller returns.
   trap 'rm -f "${tmp_launcher:-}"; trap - RETURN' RETURN
 
-  cat > "${tmp_launcher}" << EOF
-#!/usr/bin/env bash
-set -euo pipefail
-export PDFPREP_HOME="${project_dir}"
-exec "${uv_bin}" run --project "${project_dir}" ${flag_text}pdf-prep "\$@"
-EOF
+  render_launcher "${project_dir}" "${uv_bin}" "${flags[@]}" > "${tmp_launcher}"
 
   bash -n "${tmp_launcher}" || err "Generated launcher failed bash -n"
   install -m 755 "${tmp_launcher}" "${BIN_DIR}/${LAUNCHER_NAME}" \

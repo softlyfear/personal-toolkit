@@ -67,7 +67,7 @@ Full reference — [`server-scripts/README.md`](server-scripts/README.md)
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Firewall**     | UFW deny incoming · `${PORT}/tcp` (`limit`) · logging on. Blanket rules on other ports are removed only after you confirm; rules restricted to a source IP are kept and listed in the summary |
 | **Also applied** | Fail2Ban (sshd · banaction=ufw · systemd backend) · unattended-upgrades (no auto-reboot) · NTP · sysctl hardening · journald limits (200M / 14 days) · cron/at → root only                    |
-| **Safety**       | rollback on failure · `ssh.socket` masked if port ≠ 22 · IPv4 only · optional `--confirm-window` auto-revert · password also written to `/root/.<user>-credentials` (mode 600)                |
+| **Safety**       | rollback on failure · `ssh.socket` masked if port ≠ 22 · IPv4 + IPv6 when available · optional `--confirm-window` auto-revert · password also written to `/root/.<user>-credentials` (mode 600) |
 
 **Install**
 

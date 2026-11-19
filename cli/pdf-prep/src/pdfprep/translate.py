@@ -17,7 +17,7 @@ import pymupdf
 from pdfprep.config import Config
 from pdfprep.extract import Block, blocks_to_markdown, extract_blocks
 from pdfprep.fonts import find_font
-from pdfprep.pdfdoc import DocInfo, open_doc
+from pdfprep.pdfdoc import DocInfo, open_doc, slugify
 from pdfprep.providers import Provider
 from pdfprep.ui import PdfPrepError, info, warn
 
@@ -202,6 +202,50 @@ def _page_range(spec: str | None, total: int) -> range:
     return range(first - 1, min(total, last))
 
 
+def _checkpoint_path(result_dir: Path, slug: str, target_lang: str) -> Path:
+    # Language is part of the name: resuming a Russian checkpoint into a German run
+    # would publish a mixed document and still report the new language.
+    return result_dir / f"{slug}--{slugify(target_lang)}--translation-checkpoint.json"
+
+
+def _load_checkpoint(path: Path, blocks: list[Block]) -> dict[str, str]:
+    """Translated text for blocks whose source text is still the one that was translated."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict) or data.get("version") != 2:
+        return {}
+    saved = data.get("blocks")
+    if not isinstance(saved, dict):
+        return {}
+    source_by_id = {block.id: block.text for block in blocks}
+    done: dict[str, str] = {}
+    for block_id, entry in saved.items():
+        if not isinstance(entry, dict):
+            continue
+        text = entry.get("text")
+        if source_by_id.get(block_id) == entry.get("source") and isinstance(text, str):
+            done[str(block_id)] = text
+    return done
+
+
+def _write_checkpoint(
+    path: Path, target_lang: str, blocks: list[Block], done: dict[str, str]
+) -> None:
+    source_by_id = {block.id: block.text for block in blocks}
+    payload = {
+        "version": 2,
+        "lang": target_lang,
+        "blocks": {
+            block_id: {"source": source_by_id[block_id], "text": text}
+            for block_id, text in done.items()
+            if block_id in source_by_id
+        },
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
 def translate_source(
     source: Path,
     cfg: Config,
@@ -239,14 +283,12 @@ def translate_source(
         if _INJECTION.search(block.text):
             result.injection_findings.append(f"{block.id}: instruction-like text, treated as data")
 
-    checkpoint = result_dir / f"{doc_info.slug}--translation-checkpoint.json"
+    checkpoint = _checkpoint_path(result_dir, doc_info.slug, target_lang)
     done: dict[str, str] = {}
     if resume and checkpoint.is_file():
-        try:
-            done = json.loads(checkpoint.read_text(encoding="utf-8"))
+        done = _load_checkpoint(checkpoint, blocks)
+        if done:
             info(f"{source.name}: resuming, {len(done)} blocks already translated")
-        except (OSError, json.JSONDecodeError):
-            done = {}
 
     pending = [block for block in blocks if block.id not in done]
     chunks = _chunks(pending, cfg.llm.chunk_chars)
@@ -254,7 +296,7 @@ def translate_source(
     for number, chunk in enumerate(chunks, start=1):
         info(f"{source.name}: chunk {number}/{len(chunks)} ({len(chunk)} blocks)")
         done.update(_translate_chunk(provider, chunk, target_lang, glossary, result))
-        checkpoint.write_text(json.dumps(done, ensure_ascii=False), encoding="utf-8")
+        _write_checkpoint(checkpoint, target_lang, blocks, done)
 
     translated = [replace(block, text=done.get(block.id, block.text)) for block in blocks]
     result.blocks_translated = sum(1 for block in blocks if block.id in done)
@@ -345,7 +387,8 @@ def verify_urls(blocks_json: Path) -> tuple[str, str]:
     for entry in data:
         for url in _URL.findall(entry.get("source", "")):
             total += 1
-            if url not in (entry.get("translated") or ""):
+            # A longer URL that merely starts with the source URL is not the same URL.
+            if url not in set(_URL.findall(entry.get("translated") or "")):
                 missing += 1
     if total == 0:
         return "n/a", "no URLs in the source"

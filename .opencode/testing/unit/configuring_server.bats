@@ -227,6 +227,135 @@ setup() {
   assert_output "198.51.100.7"
 }
 
+@test "detect_server_ip keeps an IPv6 address from SSH_CONNECTION" {
+  SSH_CONNECTION="2001:db8::5 51000 2001:db8::7 22" run detect_server_ip
+  assert_success
+  assert_output "2001:db8::7"
+}
+
+@test "format_ssh_host brackets IPv6 and leaves IPv4 untouched" {
+  run format_ssh_host "2001:db8::7"
+  assert_success
+  assert_output "[2001:db8::7]"
+
+  run format_ssh_host "198.51.100.7"
+  assert_success
+  assert_output "198.51.100.7"
+
+  run format_ssh_host "<your-server-ip>"
+  assert_success
+  assert_output "<your-server-ip>"
+}
+
+@test "detect_server_ip skips a leading IPv6 hostname address when an IPv4 follows" {
+  run bash -c "
+    source '${REPO_ROOT}/server-scripts/configuring_server.sh'
+    unset SSH_CONNECTION
+    command() { [[ \"\$2\" == ip ]] && return 1; builtin command \"\$@\"; }
+    hostname() { [[ \"\$1\" == -I ]] && { printf '2001:db8::1 198.51.100.9\n'; return 0; }; return 1; }
+    detect_server_ip
+  "
+  assert_success
+  assert_output "198.51.100.9"
+}
+
+@test "restore_autorevert_snapshot leaves live SSH config when the snapshot is unusable" {
+  local root="${BATS_TEST_TMPDIR}/bad-snap"
+  mkdir -p "${root}/etc/ssh"
+  printf 'LIVE\n' > "${root}/etc/ssh/sshd_config"
+  printf 'not a tar\n' > "${root}/bad.tar"
+
+  run restore_autorevert_snapshot "${root}/bad.tar" "${root}/etc/ssh" "${root}/etc/ufw" "${root}/etc/default/ufw"
+  assert_failure
+  [[ "$(< "${root}/etc/ssh/sshd_config")" == "LIVE" ]]
+  [[ ! -e ${root}/etc/ssh.autorevert-old.* ]]
+}
+
+@test "restore_autorevert_snapshot refuses a snapshot with no sshd_config" {
+  local root="${BATS_TEST_TMPDIR}/empty-snap"
+  local stage="${BATS_TEST_TMPDIR}/empty-stage"
+  mkdir -p "${root}/etc/ssh" "${stage}/ssh"
+  printf 'LIVE\n' > "${root}/etc/ssh/sshd_config"
+  printf 'other\n' > "${stage}/ssh/other"
+  tar -C "${stage}" -cf "${root}/incomplete.tar" ssh
+
+  run restore_autorevert_snapshot "${root}/incomplete.tar" "${root}/etc/ssh" "${root}/etc/ufw" "${root}/etc/default/ufw"
+  assert_failure
+  [[ "$(< "${root}/etc/ssh/sshd_config")" == "LIVE" ]]
+}
+
+@test "restore_autorevert_snapshot replaces SSH only after the snapshot extracts" {
+  local root="${BATS_TEST_TMPDIR}/good-snap"
+  local stage="${BATS_TEST_TMPDIR}/good-stage"
+  mkdir -p "${root}/etc/ssh" "${stage}/ssh" "${stage}/default"
+  printf 'OLD\n' > "${root}/etc/ssh/sshd_config"
+  printf 'RESTORED\n' > "${stage}/ssh/sshd_config"
+  printf 'hostkey\n' > "${stage}/ssh/ssh_host_ed25519_key"
+  printf 'ENABLED=yes\n' > "${stage}/default/ufw"
+  tar -C "${stage}" -cf "${root}/good.tar" ssh default/ufw
+
+  run restore_autorevert_snapshot "${root}/good.tar" "${root}/etc/ssh" "${root}/etc/ufw" "${root}/etc/default/ufw"
+  assert_success
+  [[ "$(< "${root}/etc/ssh/sshd_config")" == "RESTORED" ]]
+  [[ "$(< "${root}/etc/ssh/ssh_host_ed25519_key")" == "hostkey" ]]
+  [[ "$(< "${root}/etc/default/ufw")" == "ENABLED=yes" ]]
+  [[ ! -e ${root}/etc/ssh.autorevert-old.* ]]
+}
+
+@test "generated auto-revert helper passes bash -n" {
+  local script="${BATS_TEST_TMPDIR}/hardening-autorevert"
+  print_hardening_autorevert_script 10 > "${script}"
+  run bash -n "${script}"
+  assert_success
+  grep -q 'restore_autorevert_snapshot' "${script}"
+  # The old helper deleted /etc/ssh before proving the archive could be extracted.
+  run grep -F 'rm -rf /etc/ssh' "${script}"
+  assert_failure
+}
+
+@test "hardening-confirm does not report success unless the timer is disarmed" {
+  local bin="${BATS_TEST_TMPDIR}/confirm-bin"
+  local script="${BATS_TEST_TMPDIR}/hardening-confirm"
+  local calls="${BATS_TEST_TMPDIR}/systemctl-calls"
+  mkdir -p "${bin}"
+
+  cat > "${bin}/id" << 'EOF'
+#!/usr/bin/env bash
+[[ "$1" == "-u" ]] || exit 1
+printf '%s\n' "${FAKE_UID:?}"
+EOF
+  cat > "${bin}/systemctl" << EOF
+#!/usr/bin/env bash
+printf '%s\\n' "\$*" >> '${calls}'
+if [[ "\$1" == "disable" ]]; then
+  exit "\${SYSTEMCTL_DISABLE_RC:-0}"
+fi
+if [[ "\$1" == "is-active" ]]; then
+  exit "\${SYSTEMCTL_ACTIVE_RC:-3}"
+fi
+exit 0
+EOF
+  chmod 755 "${bin}/id" "${bin}/systemctl"
+  print_hardening_confirm_script > "${script}"
+  chmod 755 "${script}"
+
+  FAKE_UID=1000 PATH="${bin}:${PATH}" run "${script}"
+  assert_failure
+  refute_output --partial "Hardening confirmed"
+  [[ ! -s "${calls}" ]]
+
+  : > "${calls}"
+  FAKE_UID=0 SYSTEMCTL_DISABLE_RC=1 PATH="${bin}:${PATH}" run "${script}"
+  assert_failure
+  refute_output --partial "Hardening confirmed"
+
+  : > "${calls}"
+  FAKE_UID=0 SYSTEMCTL_DISABLE_RC=0 SYSTEMCTL_ACTIVE_RC=0 PATH="${bin}:${PATH}" run "${script}"
+  assert_failure
+  refute_output --partial "Hardening confirmed"
+  refute_output --partial "${AUTOREVERT_SNAPSHOT}"
+}
+
 @test "detect_server_ip falls back to a placeholder when nothing resolves" {
   run bash -c "
     source '${REPO_ROOT}/server-scripts/configuring_server.sh'

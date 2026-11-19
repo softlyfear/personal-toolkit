@@ -21,6 +21,15 @@ setup() {
   assert_output "rocm-linux"
 }
 
+@test "pdf-prep launcher keeps a dollar sign in the install path literal" {
+  run render_launcher '/opt/proj/$NOT_A_VAR' /usr/bin/uv --no-default-groups --group cpu
+  assert_success
+  assert_output --partial '$NOT_A_VAR'
+  printf '%s\n' "${output}" > "${BATS_TEST_TMPDIR}/pdf-prep"
+  run bash -n "${BATS_TEST_TMPDIR}/pdf-prep"
+  assert_success
+}
+
 @test "pdf-prep: removed Windows ROCm override cannot install vulnerable wheels" {
   export PDFPREP_TORCH=rocm-windows
   run detect_torch_build windows

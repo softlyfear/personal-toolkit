@@ -111,5 +111,9 @@ def blocks_to_markdown(blocks: list[Block], title: str) -> str:
         elif block.kind == "caption":
             out += [f"*{text}*", ""]
         else:
+            # A body line that starts with "# " is not a heading. Leaving it raw makes
+            # the Branch B splitter cut the document on source text such as "# include".
+            if text.startswith("#"):
+                text = "\\" + text
             out += [text, ""]
     return "\n".join(out).strip() + "\n"

@@ -110,34 +110,89 @@ sum_item() { echo -e "  ${C_G}✔${C_R}  ${C_B}$1${C_R}${2:+ ${C_D}— $2${C_R}}
 sum_cmd() { echo -e "      ${C_Y}$1${C_R}"; }
 sum_note() { echo -e "  ${C_Y}⚠${C_R}  $1"; }
 
-detect_server_ip() {
-  local ip=""
+is_ipv4_address() {
+  [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
 
-  # Address the admin SSH'd into (best when script runs over SSH)
+# Raw address as printed by OpenSSH and iproute2: no brackets. A zone id is
+# stripped by the caller. Two "::" compressions are not a valid address.
+is_ipv6_address() {
+  local addr="$1"
+  local once=""
+
+  [[ "${addr}" =~ ^[0-9A-Fa-f:]+$ ]] || return 1
+  [[ "${addr}" == *:* ]] || return 1
+  once="${addr/::/}"
+  [[ "${once}" != *"::"* ]] || return 1
+  return 0
+}
+
+is_link_local_ipv6() {
+  local addr="${1,,}"
+  [[ "${addr}" == fe80:* ]]
+}
+
+# ssh treats an unbracketed IPv6 address as a host:port pair.
+format_ssh_host() {
+  local host="$1"
+  if [[ "${host}" == *:* ]]; then
+    printf '[%s]' "${host}"
+    return 0
+  fi
+  printf '%s' "${host}"
+}
+
+detect_server_ip() {
+  local ip="" candidate=""
+  local -a addrs=()
+
+  # Address the admin SSH'd into (best when script runs over SSH), either family.
   if [[ -n "${SSH_CONNECTION:-}" ]]; then
     ip="$(awk '{print $3}' <<< "${SSH_CONNECTION}")"
-    if [[ "${ip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+    if is_ipv4_address "${ip}" || is_ipv6_address "${ip}"; then
       printf '%s' "${ip}"
       return 0
     fi
   fi
 
-  # Default route source (typical VPS address)
+  # Default route source (typical VPS address). Prefer IPv4, then a global IPv6.
   if command -v ip > /dev/null 2>&1; then
     ip="$(ip -4 route get 1.1.1.1 2> /dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}')"
-    if [[ "${ip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+    if is_ipv4_address "${ip}"; then
+      printf '%s' "${ip}"
+      return 0
+    fi
+    ip="$(ip -6 route get 2001:4860:4860::8888 2> /dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}')"
+    ip="${ip%%%*}"
+    # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+    if is_ipv6_address "${ip}" && ! is_link_local_ipv6 "${ip}"; then
       printf '%s' "${ip}"
       return 0
     fi
   fi
 
-  # First global IPv4 on the host
+  # hostname -I is unordered and often lists IPv6 first. A later IPv4 is still usable.
   if command -v hostname > /dev/null 2>&1; then
-    ip="$(hostname -I 2> /dev/null | awk '{print $1}')"
-    if [[ "${ip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-      printf '%s' "${ip}"
-      return 0
-    fi
+    # shellcheck disable=SC2207 # addresses are space-separated; the explicit IFS keeps the split
+    IFS=' ' read -r -a addrs <<< "$(hostname -I 2> /dev/null || true)"
+    for candidate in "${addrs[@]}"; do
+      candidate="${candidate%%%*}"
+      # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+      if is_ipv4_address "${candidate}"; then
+        printf '%s' "${candidate}"
+        return 0
+      fi
+    done
+    for candidate in "${addrs[@]}"; do
+      candidate="${candidate%%%*}"
+      # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+      if is_ipv6_address "${candidate}" && ! is_link_local_ipv6 "${candidate}"; then
+        printf '%s' "${candidate}"
+        return 0
+      fi
+    done
   fi
 
   printf '%s' '<your-server-ip>'
@@ -202,16 +257,17 @@ print_final_summary() {
     fi
   fi
 
-  local server_ip=""
+  local server_ip="" ssh_host=""
   server_ip="$(detect_server_ip)"
+  ssh_host="$(format_ssh_host "${server_ip}")"
 
   sum_note "DO NOT CLOSE THIS SESSION YET — test in a new terminal:"
-  sum_cmd "ssh -p ${SSH_PORT} ${SSH_USER}@${server_ip}"
+  sum_cmd "ssh -p ${SSH_PORT} ${SSH_USER}@${ssh_host}"
   sum_cmd "sudo -i"
   echo ""
 
   if [[ "${ROLLBACK_AUTOREVERT_INSTALLED}" == "true" ]]; then
-    sum_note "Auto-revert is armed: SSH goes back to its pre-hardening state in ${CONFIRM_WINDOW_MIN} min."
+    sum_note "Auto-revert is armed: SSH and the firewall go back to their pre-hardening state in ${CONFIRM_WINDOW_MIN} min."
     sum_note "Once the new session above works, cancel it:"
     sum_cmd "sudo ${AUTOREVERT_CONFIRM}"
     echo ""
@@ -838,9 +894,121 @@ remove_lockout_autorevert() {
   ROLLBACK_AUTOREVERT_INSTALLED=false
 }
 
-# Arms a one-shot timer that puts SSH back the way it was unless the operator runs
-# hardening-confirm. The printed "test in a new terminal" warning is advice; this
-# is the only mechanism that actually recovers a server nobody can log into.
+# Replace SSH/UFW from a pre-hardening snapshot without destroying the live tree
+# until the archive has been extracted and checked. The previous `rm -rf /etc/ssh`
+# then `tar` left no SSH config at all when extraction failed, and the snapshot
+# was the only remaining copy of the host keys.
+#
+# Optional path arguments exist so unit tests can point this at a temp tree. The
+# installed helper calls it with the defaults.
+restore_autorevert_snapshot() {
+  local snapshot="$1"
+  local ssh_dir="${2:-/etc/ssh}"
+  local ufw_dir="${3:-/etc/ufw}"
+  local ufw_default="${4:-/etc/default/ufw}"
+  local stage="" old_ssh=""
+
+  [[ -f "${snapshot}" ]] || return 1
+  stage="$(mktemp -d)" || return 1
+  # A RETURN trap survives the function unless it clears itself (see RULES.md).
+  # Single quotes so stage is expanded when the trap fires, while the local still exists.
+  trap 'rm -rf "${stage}"; trap - RETURN' RETURN
+  tar -C "${stage}" -xf "${snapshot}" || return 1
+  [[ -s "${stage}/ssh/sshd_config" ]] || return 1
+
+  if [[ -e "${ssh_dir}" || -L "${ssh_dir}" ]]; then
+    old_ssh="$(mktemp -d "${ssh_dir}.autorevert-old.XXXXXX")" || return 1
+    rmdir "${old_ssh}" || return 1
+    mv "${ssh_dir}" "${old_ssh}" || return 1
+  fi
+  if ! cp -a "${stage}/ssh" "${ssh_dir}"; then
+    if [[ -n "${old_ssh}" ]]; then
+      rm -rf "${ssh_dir}"
+      mv "${old_ssh}" "${ssh_dir}" || true
+    fi
+    return 1
+  fi
+  [[ -n "${old_ssh}" ]] && rm -rf "${old_ssh}"
+
+  # SSH is already swapped. A later UFW copy failure must not skip the caller's
+  # sshd restart — that restart is what makes the restored config reachable.
+  if [[ -d "${stage}/ufw" ]]; then
+    mkdir -p "${ufw_dir}" && cp -a "${stage}/ufw/." "${ufw_dir}/" || true
+  fi
+  if [[ -f "${stage}/default/ufw" ]]; then
+    mkdir -p "$(dirname "${ufw_default}")" && cp -a "${stage}/default/ufw" "${ufw_default}" || true
+  fi
+  [[ -s "${ssh_dir}/sshd_config" ]]
+}
+
+# The installed helper is standalone (the wget-piped script is not left on the
+# host), so it embeds restore_autorevert_snapshot rather than sourcing this file.
+print_hardening_autorevert_script() {
+  local minutes="$1"
+  local fn_text=""
+  # shellcheck disable=SC2312 # declare -f failing would leave an empty helper, caught by bash -n below
+  fn_text="$(declare -f restore_autorevert_snapshot)"
+  [[ -n "${fn_text}" ]] || return 1
+
+  cat << EOF
+#!/usr/bin/env bash
+# Installed by configuring_server.sh --confirm-window ${minutes}.
+set -euo pipefail
+logger -t hardening-autorevert "no confirmation within ${minutes}m — restoring pre-hardening SSH access" || true
+EOF
+  printf '%s\n' "${fn_text}"
+  cat << EOF
+if ! restore_autorevert_snapshot "${AUTOREVERT_SNAPSHOT}"; then
+  logger -t hardening-autorevert "restore failed; current SSH config left in place" || true
+  exit 1
+fi
+# Same reasoning as rollback_on_failure: re-enable reloads the restored rules on a host
+# that had UFW running, and only a host that had it off gets it switched off.
+if grep -qs '^ENABLED=yes' /etc/ufw/ufw.conf; then
+  ufw --force enable > /dev/null 2>&1 || true
+else
+  ufw --force disable > /dev/null 2>&1 || true
+fi
+systemctl unmask ssh.socket > /dev/null 2>&1 || true
+systemctl enable --now ssh.socket > /dev/null 2>&1 || true
+systemctl restart ssh.service > /dev/null 2>&1 || true
+systemctl stop fail2ban > /dev/null 2>&1 || true
+systemctl disable --now hardening-autorevert.timer > /dev/null 2>&1 || true
+# The snapshot holds this host's private SSH keys; drop it only after the restore
+# has visibly produced a usable /etc/ssh.
+if [[ -s /etc/ssh/sshd_config ]]; then
+  rm -f "${AUTOREVERT_SNAPSHOT}"
+fi
+EOF
+}
+
+# Fail closed. The previous helper swallowed every systemctl/rm error and still
+# printed success, so a non-root run (or a timer that stayed active) looked cancelled.
+print_hardening_confirm_script() {
+  cat << EOF
+#!/usr/bin/env bash
+# Cancels the pending hardening auto-revert. Run this once a new SSH session works.
+set -euo pipefail
+if [[ "\$(id -u)" -ne 0 ]]; then
+  printf 'error: run as root: sudo %s\n' '${AUTOREVERT_CONFIRM}' >&2
+  exit 1
+fi
+systemctl disable --now hardening-autorevert.timer
+if systemctl is-active --quiet hardening-autorevert.timer; then
+  printf 'error: auto-revert timer is still active\n' >&2
+  exit 1
+fi
+rm -f '${AUTOREVERT_TIMER}' '${AUTOREVERT_SERVICE}' '${AUTOREVERT_SCRIPT}' '${AUTOREVERT_SNAPSHOT}'
+systemctl daemon-reload || true
+printf 'Hardening confirmed — automatic revert cancelled.\n'
+printf 'This helper is no longer needed: rm -f %s\n' '${AUTOREVERT_CONFIRM}'
+EOF
+}
+
+# Arms a one-shot timer that puts SSH and the firewall back the way they were
+# unless the operator runs hardening-confirm. The printed "test in a new terminal"
+# warning is advice; this is the only mechanism that actually recovers a server
+# nobody can log into.
 install_lockout_autorevert() {
   local minutes="$1"
   local -a snapshot_paths=(ssh)
@@ -854,43 +1022,14 @@ install_lockout_autorevert() {
     || err "Failed to snapshot SSH/UFW config for auto-revert"
   chmod 600 "${AUTOREVERT_SNAPSHOT}"
 
-  cat > "${AUTOREVERT_SCRIPT}" << EOF
-#!/usr/bin/env bash
-# Installed by configuring_server.sh --confirm-window ${minutes}.
-set -uo pipefail
-logger -t hardening-autorevert "no confirmation within ${minutes}m — restoring pre-hardening SSH access"
-rm -rf /etc/ssh
-tar -C /etc -xf "${AUTOREVERT_SNAPSHOT}"
-# Same reasoning as rollback_on_failure: re-enable reloads the restored rules on a host
-# that had UFW running, and only a host that had it off gets it switched off.
-if grep -qs '^ENABLED=yes' /etc/ufw/ufw.conf; then
-  ufw --force enable > /dev/null 2>&1 || true
-else
-  ufw --force disable > /dev/null 2>&1 || true
-fi
-systemctl unmask ssh.socket > /dev/null 2>&1 || true
-systemctl enable --now ssh.socket > /dev/null 2>&1 || true
-systemctl restart ssh.service > /dev/null 2>&1 || true
-systemctl stop fail2ban > /dev/null 2>&1 || true
-systemctl disable --now hardening-autorevert.timer > /dev/null 2>&1 || true
-# The snapshot holds this host's private SSH keys; drop it as soon as the restore
-# that needed it has visibly produced a usable /etc/ssh.
-if [[ -s /etc/ssh/sshd_config ]]; then
-  rm -f "${AUTOREVERT_SNAPSHOT}"
-fi
-EOF
+  print_hardening_autorevert_script "${minutes}" > "${AUTOREVERT_SCRIPT}"
+  [[ -s "${AUTOREVERT_SCRIPT}" ]] || err "Failed to write ${AUTOREVERT_SCRIPT}"
+  bash -n "${AUTOREVERT_SCRIPT}" || err "Auto-revert helper failed bash -n"
   chmod 700 "${AUTOREVERT_SCRIPT}"
 
-  cat > "${AUTOREVERT_CONFIRM}" << EOF
-#!/usr/bin/env bash
-# Cancels the pending hardening auto-revert. Run this once a new SSH session works.
-set -uo pipefail
-systemctl disable --now hardening-autorevert.timer > /dev/null 2>&1 || true
-rm -f "${AUTOREVERT_TIMER}" "${AUTOREVERT_SERVICE}" "${AUTOREVERT_SCRIPT}" "${AUTOREVERT_SNAPSHOT}"
-systemctl daemon-reload > /dev/null 2>&1 || true
-printf 'Hardening confirmed — automatic revert cancelled.\n'
-printf 'This helper is no longer needed: rm -f %s\n' "${AUTOREVERT_CONFIRM}"
-EOF
+  print_hardening_confirm_script > "${AUTOREVERT_CONFIRM}"
+  [[ -s "${AUTOREVERT_CONFIRM}" ]] || err "Failed to write ${AUTOREVERT_CONFIRM}"
+  bash -n "${AUTOREVERT_CONFIRM}" || err "Confirm helper failed bash -n"
   chmod 700 "${AUTOREVERT_CONFIRM}"
 
   cat > "${AUTOREVERT_SERVICE}" << EOF
@@ -922,7 +1061,7 @@ EOF
   systemctl enable --now hardening-autorevert.timer > /dev/null 2>&1 \
     || err "Failed to arm the auto-revert timer"
   ROLLBACK_AUTOREVERT_INSTALLED=true
-  ok "Auto-revert armed: SSH is restored in ${minutes} min unless you run ${AUTOREVERT_CONFIRM}"
+  ok "Auto-revert armed: SSH and the firewall are restored in ${minutes} min unless you run ${AUTOREVERT_CONFIRM}"
 }
 
 # OnActiveSec counts from the moment the timer was started, and the timer is armed before

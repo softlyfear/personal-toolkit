@@ -109,6 +109,38 @@ prompt_new_user() {
   err "Invalid username after ${max_attempts} attempts"
 }
 
+sanitize_ipv4_input() {
+  local raw="$1"
+  raw="${raw//$'\r'/}"
+  raw="${raw//[[:space:]]/}"
+  printf '%s' "${raw}"
+}
+
+# The previous check accepted 999.999.999.999. ufw may install that rule, after
+# which RDP is open to an address that cannot exist.
+valid_ipv4() {
+  local ip="$1"
+  local octet=""
+
+  [[ "${ip}" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+  for octet in "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"; do
+    ((10#${octet} <= 255)) || return 1
+  done
+}
+
+# OpenSSH 10.2 prints "port"; OpenSSH 10.5 prints "Port". Match both.
+parse_sshd_port() {
+  tr '[:upper:]' '[:lower:]' | awk '/^port[[:space:]]/{print $2; exit}'
+}
+
+# An incoming ALLOW/LIMIT from Anywhere keeps this SSH session reachable.
+# DENY, OUT, a v6-only line, or a rule restricted to some other source IP does not:
+# treating those as "already open" and then enabling UFW drops the current login.
+ufw_has_open_ssh_rule() {
+  local ssh_port="$1"
+  grep -qE "^[[:space:]]*\[[[:space:]]*[0-9]+\][[:space:]]+${ssh_port}/tcp[[:space:]]+(ALLOW|LIMIT)[[:space:]]+IN[[:space:]]+Anywhere([[:space:]]|$)"
+}
+
 ensure_ssh_ufw_rule() {
   local ssh_port="${SSH_PORT:-}"
   local sshd_bin=""
@@ -126,7 +158,7 @@ ensure_ssh_ufw_rule() {
       sshd_bin="/usr/sbin/sshd"
     fi
     if [[ -n "${sshd_bin}" ]]; then
-      ssh_port="$({ ${SUDO} "${sshd_bin}" -T 2> /dev/null || true; } | awk '/^port /{print $2; exit}')"
+      ssh_port="$({ ${SUDO} "${sshd_bin}" -T 2> /dev/null || true; } | parse_sshd_port)"
     fi
   fi
 
@@ -134,7 +166,8 @@ ensure_ssh_ufw_rule() {
     err "Could not safely determine the SSH port; set it via SSH_PORT"
   fi
 
-  if ! ${SUDO} ufw status numbered 2> /dev/null | grep -qE "^[[:space:]]*\[[[:space:]]*[0-9]+\][[:space:]]+${ssh_port}/tcp"; then
+  # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+  if ! ${SUDO} ufw status numbered 2> /dev/null | ufw_has_open_ssh_rule "${ssh_port}"; then
     ${SUDO} ufw allow "${ssh_port}/tcp"
     ok "UFW rule added for SSH port ${ssh_port}/tcp"
   else
@@ -160,10 +193,13 @@ ensure_sudo_user() {
 }
 
 prompt_rdp_source_ip() {
+  local raw=""
+
   echo ""
   info "Optional: restrict RDP access to a single source IP (recommended)."
   info "Enter trusted IPv4 (example: 203.0.113.10) or leave empty for open access:"
-  read -r RDP_SOURCE_IP < /dev/tty
+  read -r raw < /dev/tty
+  RDP_SOURCE_IP="$(sanitize_ipv4_input "${raw}")"
 }
 
 configure_xfce_session() {
@@ -213,7 +249,8 @@ main() {
   ensure_ssh_ufw_rule
   prompt_rdp_source_ip
   if [[ -n "${RDP_SOURCE_IP:-}" ]]; then
-    if [[ ! "${RDP_SOURCE_IP}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+    if ! valid_ipv4 "${RDP_SOURCE_IP}"; then
       err "Invalid IPv4 address for RDP restriction: ${RDP_SOURCE_IP}"
     fi
     ${SUDO} ufw allow from "${RDP_SOURCE_IP}" to any port "${RDP_PORT}" proto tcp

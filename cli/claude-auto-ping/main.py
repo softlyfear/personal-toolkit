@@ -144,12 +144,17 @@ def ping(claude: str, model: str, token_path: Path) -> bool:
     took = time.monotonic() - started
     if proc.returncode != 0:
         # claude -p reports a refusal (bad model, usage limit, no login) on stdout, not stderr
-        reason = " ".join((proc.stdout + " " + proc.stderr).split())[:300]
-        log.error(
-            "exit %s after %.1fs · %s", proc.returncode, took, reason or "no output"
-        )
-        if any(marker in reason for marker in AUTH_FAILURES):
+        reason = " ".join((proc.stdout + " " + proc.stderr).split())
+        # Match the marker before truncating the log line: a refusal past the first
+        # 300 characters would otherwise be retried as a transient failure.
+        if any(marker.casefold() in reason.casefold() for marker in AUTH_FAILURES):
             raise AuthError("claude rejected the login")
+        log.error(
+            "exit %s after %.1fs · %s",
+            proc.returncode,
+            took,
+            reason[:300] or "no output",
+        )
         return False
     log.info(
         "window opened in %.1fs · reply: %s", took, " ".join(proc.stdout.split())[:120]

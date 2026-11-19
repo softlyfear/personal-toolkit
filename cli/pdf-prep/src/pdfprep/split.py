@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import shutil
+import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from itertools import pairwise
 from pathlib import Path
@@ -19,7 +21,17 @@ import pymupdf
 from pdfprep import compress
 from pdfprep.config import Config
 from pdfprep.extract import blocks_to_markdown, extract_blocks
-from pdfprep.pdfdoc import MB, DocInfo, Section, continuation_pages, open_doc, slugify
+from pdfprep.pdfdoc import (
+    MB,
+    DocInfo,
+    Section,
+    claim_slug,
+    continuation_pages,
+    open_doc,
+    slug_owner,
+    slugify,
+    source_key,
+)
 from pdfprep.ui import PdfPrepError, warn
 
 
@@ -514,14 +526,21 @@ def _branch_b(doc: pymupdf.Document, result: SplitResult, cfg: Config) -> None:
     lines = markdown.splitlines()
     # The document title is the only H1, so splitting on "# " alone would yield one file:
     # cut on the shallowest heading level that actually repeats in the text.
+    # Lines inside a code fence are source text, not headings, even when they start with "# ".
+    visible = _lines_outside_fences(lines)
     marker = next(
-        (m for m in ("# ", "## ", "### ") if sum(line.startswith(m) for line in lines) > 1),
+        (m for m in ("# ", "## ", "### ") if sum(line.startswith(m) for line in visible) > 1),
         "# ",
     )
     chunks: list[tuple[str, list[str]]] = []
     current_title, current_lines = result.info.path.stem, []
+    fenced = False
     for line in lines:
-        if line.startswith(marker):
+        if line.startswith("```"):
+            fenced = not fenced
+            current_lines.append(line)
+            continue
+        if not fenced and line.startswith(marker):
             if current_lines:
                 chunks.append((current_title, current_lines))
             current_title, current_lines = line[len(marker) :].strip(), [line]
@@ -546,33 +565,74 @@ def _branch_b(doc: pymupdf.Document, result: SplitResult, cfg: Config) -> None:
         )
 
 
-def _clear_previous_run(result_dir: Path, slug: str) -> int:
-    """A re-run with different limits produces different file names; leaving the old ones
-    behind would put stale parts next to the new set and skew the validation counts.
+def _lines_outside_fences(lines: list[str]) -> list[str]:
+    visible: list[str] = []
+    fenced = False
+    for line in lines:
+        if line.startswith("```"):
+            fenced = not fenced
+            continue
+        if not fenced:
+            visible.append(line)
+    return visible
 
-    Only what this command writes for this slug is removed — result/ is flat and shared, so a
-    translation, a compressed copy, or another document's parts belong to someone else and stay.
-    """
+
+def _previous_outputs(result_dir: Path, slug: str) -> list[Path]:
     patterns = (
         f"{slug}--part_*.pdf",
         *(f"{slug}--manifest.{suffix}" for suffix in INDEX_SUFFIXES),
         f"{slug}--document.md",
         f"{slug}--[0-9][0-9]_*.md",
     )
-    removed = 0
+    found: list[Path] = []
     for pattern in patterns:
-        for path in result_dir.glob(pattern):
-            if path.is_file():
-                path.unlink()
-                removed += 1
-    return removed
+        found.extend(path for path in result_dir.glob(pattern) if path.is_file())
+    return found
+
+
+@contextmanager
+def _held_previous_run(result_dir: Path, slug: str, source: Path):
+    """Move this slug's previous output aside until the new run finishes.
+
+    Deleting first meant a failed re-run left neither the old set nor a new one.
+    A slug owned by a different source is not ours to move.
+    """
+    owner = slug_owner(result_dir, slug)
+    if owner and owner != source_key(source):
+        raise PdfPrepError(f"{source.name}: result slug {slug!r} belongs to another document")
+    stash = Path(tempfile.mkdtemp(prefix=f".{slug}-previous-"))
+    moved = 0
+    try:
+        for path in _previous_outputs(result_dir, slug):
+            path.rename(stash / path.name)
+            moved += 1
+        yield moved
+    except Exception:
+        for path in list(stash.iterdir()):
+            target = result_dir / path.name
+            if target.exists():
+                target.unlink()
+            path.rename(target)
+        raise
+    else:
+        shutil.rmtree(stash, ignore_errors=True)
+    finally:
+        if stash.exists():
+            shutil.rmtree(stash, ignore_errors=True)
 
 
 def split_source(source: Path, cfg: Config, doc_info: DocInfo) -> SplitResult:
     result_dir = cfg.result_dir
     result_dir.mkdir(parents=True, exist_ok=True)
+    claim_slug(result_dir, doc_info.slug, source)
+    with _held_previous_run(result_dir, doc_info.slug, source) as replaced:
+        return _split_prepared(source, cfg, doc_info, replaced)
+
+
+def _split_prepared(source: Path, cfg: Config, doc_info: DocInfo, replaced: int) -> SplitResult:
+    result_dir = cfg.result_dir
     result = SplitResult(info=doc_info, branch="A", result_dir=result_dir)
-    result.replaced = _clear_previous_run(result_dir, doc_info.slug)
+    result.replaced = replaced
 
     branch_b = doc_info.kind == "TextBased" and not doc_info.has_tables and not doc_info.has_images
     if branch_b:

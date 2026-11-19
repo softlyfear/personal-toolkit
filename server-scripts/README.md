@@ -178,7 +178,10 @@ already printed the credentials.
 This is the only mechanism that recovers a server nobody can log into. Before the first access-affecting
 change it snapshots `/etc/ssh` + `/etc/ufw` + `/etc/default/ufw` into `/root/.pre-hardening-ssh.tar`
 (mode 600) and arms `hardening-autorevert.timer`. If the timer fires, it puts SSH and the firewall back the
-way they were, unmasks `ssh.socket` and stops Fail2Ban. Cancel it from the new session:
+way they were, unmasks `ssh.socket` and stops Fail2Ban. The restore extracts the snapshot
+and checks `sshd_config` before replacing `/etc/ssh`, so a bad archive does not delete the live
+config. Cancel it from the new session — the helper exits with an error, and does not claim
+success, unless it is root and the timer is actually inactive:
 
 ```bash
 sudo /usr/local/sbin/hardening-confirm

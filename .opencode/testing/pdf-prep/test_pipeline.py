@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pymupdf
 import pytest
-from pdfprep import compress, config, ocr, pdfdoc, split
+from pdfprep import compress, config, ocr, pdfdoc, split, translate
+from pdfprep.extract import Block
 from pdfprep.ui import PdfPrepError
 
 from conftest import body_text
@@ -70,3 +71,65 @@ def test_no_gpu_and_no_loaded_reader_means_cpu(monkeypatch, device) -> None:
     monkeypatch.setattr(ocr, "gpu_status", lambda: (False, "no GPU visible to torch"))
 
     assert not ocr._use_gpu(device, ("en",))
+
+
+def test_a_later_run_of_another_manual_does_not_inherit_the_slug(tmp_path) -> None:
+    first = tmp_path / "a" / "manual.pdf"
+    second = tmp_path / "b" / "manual.pdf"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_bytes(b"%PDF")
+    second.write_bytes(b"%PDF")
+    result = tmp_path / "result"
+    result.mkdir()
+
+    first_slugs = pdfdoc.unique_slugs([first], tmp_path, result)
+    assert first_slugs[first] == "manual"
+    (result / "manual--part_001_intro.pdf").write_bytes(b"old")
+
+    second_slugs = pdfdoc.unique_slugs([second], tmp_path, result)
+    assert second_slugs[second] != "manual"
+    assert (result / "manual--part_001_intro.pdf").is_file()
+
+
+def test_discover_finds_an_uppercase_pdf_suffix(tmp_path) -> None:
+    source = tmp_path / "Scan.PDF"
+    source.write_bytes(b"%PDF")
+    assert pdfdoc.discover(tmp_path) == [source]
+
+
+def test_url_gate_rejects_a_url_that_only_contains_the_source_url(tmp_path) -> None:
+    blocks = tmp_path / "blocks.json"
+    blocks.write_text(
+        '[{"source": "see https://example.com/a", "translated": "see https://example.com/a/extra"}]',
+        encoding="utf-8",
+    )
+    status, _detail = translate.verify_urls(blocks)
+    assert status == "fail"
+
+
+def test_checkpoint_ignores_a_different_language_and_changed_source(tmp_path) -> None:
+    block = Block(
+        id="p1_b1",
+        page=0,
+        bbox=(0, 0, 10, 10),
+        kind="paragraph",
+        text="belt tension",
+        size=11,
+        level=0,
+    )
+    path = translate._checkpoint_path(tmp_path, "manual", "russian")
+    translate._write_checkpoint(path, "russian", [block], {"p1_b1": "натяжение"})
+    assert translate._load_checkpoint(path, [block])["p1_b1"] == "натяжение"
+    changed = Block(
+        id="p1_b1",
+        page=0,
+        bbox=(0, 0, 10, 10),
+        kind="paragraph",
+        text="roller alignment",
+        size=11,
+        level=0,
+    )
+    assert translate._load_checkpoint(path, [changed]) == {}
+    german = translate._checkpoint_path(tmp_path, "manual", "german")
+    assert not german.exists()

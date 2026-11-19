@@ -77,6 +77,6 @@ points to preserve when modifying it:
   own session and the script before the summary shows the credentials. `whoami` is useless here (always root).
 - Functions are grouped by section banners (`UI`, prompts, SSH keys, network/systemd, rollback, users, sshd,
   other services) — keep new functions under the matching banner rather than appending at the end.
-- `verify_ssh_port_available`, `verify_sshd_port`, and `verify_ssh_ipv4_only` re-check the *effective* runtime
+- `verify_ssh_port_available`, `verify_sshd_port`, and `verify_ssh_address_families` re-check the *effective* runtime
   config via `sshd -T` after writing config, rather than trusting the written file — don't replace these with
   static file checks.

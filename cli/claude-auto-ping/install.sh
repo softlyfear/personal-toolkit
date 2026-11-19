@@ -22,7 +22,7 @@ IFS=$'\n\t'
 readonly RAW_BASE="https://raw.githubusercontent.com/user/personal-toolkit/main/cli/claude-auto-ping"
 readonly UNIT_NAME="claude-auto-ping.service"
 readonly LOCAL_BIN="${HOME}/.local/bin"
-readonly UNIT_DIR="${HOME}/.config/systemd/user"
+readonly UNIT_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
 readonly INSTALL_DIR="${CLAUDE_AUTO_PING_DIR:-${HOME}/.local/share/claude-auto-ping}"
 readonly JOURNAL_WAIT_S=10
 # Keep in sync with DEFAULT_MODEL in main.py — the login check must use the model the unit will use
@@ -156,7 +156,7 @@ verify_login() {
     # main.py refuses a looser file; failing here beats a unit that fails every slot
     [[ "${mode}" == "600" || "${mode}" == "400" ]] \
       || err "${TOKEN_FILE} has mode ${mode} — run: chmod 600 ${TOKEN_FILE}"
-    token="$(< "${TOKEN_FILE}")"
+    token="$(read_token_file "${TOKEN_FILE}")"
     [[ -n "${token}" ]] || err "${TOKEN_FILE} is empty"
     info "Using the token from ${TOKEN_FILE}"
   fi
@@ -174,8 +174,28 @@ verify_login() {
     return 0
   fi
 
-  warn "claude exited ${status}: ${output:0:200}"
-  return 1
+  # A dead login is the one failure the second pass can fix. A timeout, a missing
+  # binary or a usage limit must not look like "step 1 succeeded".
+  # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
+  if login_failure_is_auth "${output}"; then
+    warn "claude exited ${status}: ${output:0:200}"
+    return 1
+  fi
+  err "claude login check failed (exit ${status}): ${output:0:200}"
+}
+
+# main.py strips the token. A CRLF paste must not be rejected here and accepted there.
+read_token_file() {
+  local token=""
+  token="$(tr -d '\r' < "$1")"
+  token="${token#"${token%%[![:space:]]*}"}"
+  token="${token%"${token##*[![:space:]]}"}"
+  printf '%s' "${token}"
+}
+
+login_failure_is_auth() {
+  local folded="${1,,}"
+  [[ "${folded}" == *"failed to authenticate"* || "${folded}" == *"not logged in"* ]]
 }
 
 print_login_instructions() {
@@ -193,13 +213,48 @@ print_login_instructions() {
 # systemd user unit
 # =============================================================================
 
-install_unit() {
-  local app_dir="$1" uv_bin=""
-
+# sed would treat "&", "\" and "|" in a path as replacement syntax, and an unquoted
+# ExecStart splits on spaces. Same quoting rules as the Codex installer.
+render_unit() {
+  local app_dir="$1" output="$2" uv_bin="" claude_bin=""
   uv_bin="$(command -v uv)"
+  claude_bin="$(command -v claude || true)"
+  python3 - "${app_dir}/${UNIT_NAME}.in" "${output}" "${app_dir}" "${uv_bin}" "${claude_bin}" << 'EOF'
+from pathlib import Path
+import sys
+
+source, output, directory, uv, claude = sys.argv[1:]
+
+def quote(value):
+    if "\n" in value or "\r" in value:
+        raise SystemExit("A systemd path cannot contain a newline")
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
+
+path_dirs = []
+for binary in (claude, uv):
+    if binary:
+        path_dirs.append(str(Path(binary).parent))
+path_dirs.extend([str(Path.home() / ".local/bin"), "/usr/local/bin", "/usr/bin", "/bin"])
+values = {
+    "__DIR__": directory.replace("%", "%%"),
+    "__UV__": quote(uv),
+    "__PATH_ENV__": quote("PATH=" + ":".join(dict.fromkeys(path_dirs))),
+}
+unit = Path(source).read_text(encoding="utf-8")
+for marker, value in values.items():
+    unit = unit.replace(marker, value)
+for marker in ("__DIR__", "__UV__", "__PATH_ENV__"):
+    if marker in unit:
+        raise SystemExit(f"unit template still contains {marker}")
+Path(output).write_text(unit, encoding="utf-8")
+EOF
+}
+
+install_unit() {
+  local app_dir="$1"
+
   mkdir -p "${UNIT_DIR}"
-  sed "s|__DIR__|${app_dir}|; s|__UV__|${uv_bin}|" "${app_dir}/${UNIT_NAME}.in" \
-    > "${UNIT_DIR}/${UNIT_NAME}" || err "Failed to render ${UNIT_DIR}/${UNIT_NAME}"
+  render_unit "${app_dir}" "${UNIT_DIR}/${UNIT_NAME}"
   systemctl --user daemon-reload
   systemctl --user enable "${UNIT_NAME}" > /dev/null 2>&1 \
     || err "systemctl --user enable ${UNIT_NAME} failed"
