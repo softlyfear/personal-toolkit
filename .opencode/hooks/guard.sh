@@ -7,7 +7,7 @@
 #
 # Event: {"tool":"shell","command":"...","cwd":"..."}
 #        {"tool":"edit","paths":["..."],"cwd":"..."}
-# Allow: empty stdout. Deny: {"effect":"deny","message":"..."}
+# Default: empty stdout allows. --json-verdict requires a complete JSON response.
 #
 #   - `git commit` runs .opencode/lint.sh first and is denied while the gate fails;
 #   - git commands with no undo (force push, reset --hard, clean -f, history rewrites)
@@ -16,7 +16,7 @@
 #   - lint and hook configuration is denied the same way, with ALLOW_CONFIG_EDIT=1.
 #
 # The prefixes prevent accidental changes; explicit authorization must come from the user.
-# OpenCode's permission hook turns a deny object into effect "deny". An empty result allows.
+# OpenCode's permission hook uses --json-verdict and rejects a failed check.
 #
 set -euo pipefail
 IFS=$'\n\t'
@@ -197,15 +197,18 @@ main() {
       check_bash "${field}" "${repo}"
       ;;
     edit)
-      # jq lists each edit target; a failure leaves the list empty and the edit is not denied here.
-      field="$(jq -r '(.paths // [])[], (.path // empty)' <<< "${input}")" || field=""
+      field="$(jq -r '(.paths // [])[], (.path // empty)' <<< "${input}")"
       mapfile -t paths <<< "${field}"
       check_paths "${repo}" "${cwd}" "${paths[@]}"
       ;;
-    *) ;;
+    *) return 2 ;;
   esac
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
-  main "$@"
+  if [[ ${1:-} == --json-verdict ]]; then
+    main | jq -cs 'if length == 0 then {effect: "allow"} elif length == 1 then .[0] else error("expected one guard verdict") end'
+  else
+    main "$@"
+  fi
 fi

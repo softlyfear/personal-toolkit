@@ -158,3 +158,13 @@ run_guard() {
   assert_success
   assert_output ""
 }
+@test "guard: plugin protocol returns an explicit allow for a routine command" {
+  run bash -c 'printf "%s\n" "{\"tool\":\"shell\",\"command\":\"git status\"}" | bash .opencode/hooks/guard.sh --json-verdict'
+  assert_success
+  assert_output '{"effect":"allow"}'
+}
+
+@test "guard: plugin protocol exits unsuccessfully for malformed input" {
+  run bash -c 'printf "%s\n" "not-json" | bash .opencode/hooks/guard.sh --json-verdict'
+  assert_failure
+}

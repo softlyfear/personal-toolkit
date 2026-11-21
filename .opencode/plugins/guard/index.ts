@@ -11,8 +11,8 @@ type GuardPayload = {
   cwd: string
 }
 
-// Fail closed only on an explicit deny. A missing or crashing guard must not lock the session.
 function denyMessage(guard: string, payload: GuardPayload): Promise<string | null> {
+  const unavailable = "Blocked: repository guard could not verify this operation."
   return new Promise((resolve) => {
     let settled = false
     const finish = (value: string | null) => {
@@ -20,7 +20,8 @@ function denyMessage(guard: string, payload: GuardPayload): Promise<string | nul
       settled = true
       resolve(value)
     }
-    const child = spawn("bash", [guard], { stdio: ["pipe", "pipe", "pipe"] })
+    const child = spawn("bash", [guard, "--json-verdict"], { stdio: ["pipe", "pipe", "pipe"] })
+    child.stderr.resume()
     let out = ""
     const timer = setTimeout(() => {
       child.kill("SIGKILL")
@@ -32,20 +33,27 @@ function denyMessage(guard: string, payload: GuardPayload): Promise<string | nul
     })
     child.on("error", () => {
       clearTimeout(timer)
-      finish(null)
+      finish(unavailable)
     })
-    child.on("close", () => {
+    child.stdin.on("error", () => {
+      clearTimeout(timer)
+      finish(unavailable)
+    })
+    child.on("close", (code) => {
       clearTimeout(timer)
       const text = out.trim()
-      if (!text) {
-        finish(null)
+      if (code !== 0 || !text) {
+        finish(unavailable)
         return
       }
       try {
-        const parsed = JSON.parse(text) as { effect?: string; message?: string }
-        finish(parsed.effect === "deny" ? parsed.message || "Blocked by repository guard." : null)
+        const parsed = JSON.parse(text)
+        if (parsed?.effect === "allow") finish(null)
+        else if (parsed?.effect === "deny" && typeof parsed.message === "string") {
+          finish(parsed.message || unavailable)
+        } else finish(unavailable)
       } catch {
-        finish(null)
+        finish(unavailable)
       }
     })
     child.stdin.end(JSON.stringify(payload))
@@ -59,7 +67,7 @@ export default Plugin.define({
     const guard = path.join(root, ".opencode/hooks/guard.sh")
 
     await ctx.permission.hook("evaluate", async (event) => {
-      if (event.action !== "shell" && event.action !== "edit") return
+      if (event.effect === "deny" || (event.action !== "shell" && event.action !== "edit")) return
       if (event.resources.length === 0) return
       const payload: GuardPayload =
         event.action === "shell"

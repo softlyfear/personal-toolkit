@@ -115,9 +115,9 @@ main() {
   ok "unit tests passed"
 
   info "4/4 ruff ${PYTHON_DIR}/, pytest ${PDFPREP_TEST_DIR}"
-  uvx ruff format --check "${PYTHON_DIR}" "${PDFPREP_TEST_DIR}" \
+  uvx ruff format --check --extend-exclude .work "${PYTHON_DIR}" "${PDFPREP_TEST_DIR}" \
     || err "Python formatting differs. Fix with: uvx ruff format <files>"
-  uvx ruff check "${PYTHON_DIR}" "${PDFPREP_TEST_DIR}" || err "Ruff reported findings"
+  uvx ruff check --extend-exclude .work "${PYTHON_DIR}" "${PDFPREP_TEST_DIR}" || err "Ruff reported findings"
   # A venv of its own: the launcher keeps .venv on the GPU torch build, and a plain
   # `uv run` would re-sync it to the CPU one. --locked fails on a stale uv.lock.
   UV_PROJECT_ENVIRONMENT="${repo_root}/${PDFPREP_DIR}/.venv-test" \
