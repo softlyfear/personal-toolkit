@@ -60,8 +60,9 @@ Do not duplicate instructions or skills that OpenCode already discovers.
 
 - `.opencode/skills/` holds project skills, including the Docker suite runner.
 - `.opencode/RULES.md`, `.opencode/lint.sh` and `.opencode/testing/` are the quality gate and tests.
-- `.opencode/hooks/guard.sh` is the tripwire. `.opencode/plugins/guard/` calls it from OpenCode's
-  permission hook. This repository had no MCP servers to transfer; do not add one unless a task needs it.
+- `.opencode/hooks/guard.sh` is the tripwire, run by its unit tests. OpenCode does not call it;
+  run `bash .opencode/lint.sh` before committing. This repository had no MCP servers to transfer;
+  do not add one unless a task needs it.
 
 ## Critical constraint: scripts are curl/wget-piped, not cloned
 
@@ -138,14 +139,13 @@ torch): a plain `uv run` would re-sync the launcher's `.venv` away from its GPU 
 newly created script is checked before it is ever staged. The only exclusion is the vendored
 `.opencode/testing/unit/test_helper/`; `web3/` is included.
 
-**Commit gate.** `.opencode/plugins/guard/` calls `guard.sh` before a shell or edit permission is
-allowed. A `git commit` runs `.opencode/lint.sh` first and is denied while the gate fails.
-Destructive Git and writes to protected gate files are denied unless the shell command includes
-`ALLOW_DESTRUCTIVE_GIT=1` or `ALLOW_CONFIG_EDIT=1` after the user has explicitly authorized that
-action. Those prefixes are how an already-authorized command gets through the tripwire; they are
-not a substitute for asking. The check is a tripwire, not a shell parser, and it looks at the
-working tree, not only staged files. If the plugin is not loaded, the tripwire is not enforced:
-still run `bash .opencode/lint.sh` before committing. `.github/workflows/gate.yml` runs the same
+**Commit gate.** OpenCode does not run `guard.sh`, so the tripwire is not enforced automatically:
+run `bash .opencode/lint.sh` before committing. `guard.sh`, when run, denies a `git commit` while
+that gate fails and denies destructive Git and writes to protected gate files unless the command
+includes `ALLOW_DESTRUCTIVE_GIT=1` or `ALLOW_CONFIG_EDIT=1` after the user has explicitly
+authorized that action. Those prefixes are how an already-authorized command gets through the
+tripwire; they are not a substitute for asking. The check is a tripwire, not a shell parser, and
+it looks at the working tree, not only staged files. `.github/workflows/gate.yml` runs the same
 gate on every push; tool hashes and action commits remain pinned there.
 
 Two things that are easy to get wrong and are already documented in `.opencode/RULES.md`:

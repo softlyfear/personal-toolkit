@@ -110,7 +110,7 @@ run_guard() {
 
 @test "guard: gate configuration and the CI workflow are protected" {
   local path
-  for path in .opencode/hooks/guard.sh .opencode/plugins/guard/index.ts opencode.jsonc .github/workflows/gate.yml; do
+  for path in .opencode/hooks/guard.sh opencode.jsonc .github/workflows/gate.yml; do
     protected_config "${path}"
     run run_guard "$(jq -n --arg command "tee ${path}" '{tool:"shell", command:$command}')"
     assert_success

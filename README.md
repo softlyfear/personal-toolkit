@@ -12,7 +12,7 @@
 | **[`dev-tools/`](dev-tools/)**           | `devsetup` installer, FastAPI `Makefile` template      | [README](dev-tools/README.md)               |
 | **[`cli/`](cli/)**                       | `claude-auto-ping`, `pdf-prep` — small Python tools    | [README](cli/README.md)                     |
 | **[`web3/`](web3/)**                     | Cosmos and Ethereum node helpers · unmaintained        | [README](web3/README.md)                    |
-| `.opencode/`                               | OpenCode skills, guard plugin, quality gate and tests  | [RULES.md](.opencode/RULES.md)                |
+| `.opencode/`                               | OpenCode skills, quality gate, guard tripwire and tests | [RULES.md](.opencode/RULES.md)                |
 
 ## Quick start
 

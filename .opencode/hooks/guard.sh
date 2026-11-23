@@ -2,7 +2,7 @@
 #
 # guard.sh — repository tripwire for destructive Git, protected config, and the commit gate.
 #
-# Usage:    called by .opencode/plugins/guard/ and by unit tests; reads one JSON event on stdin
+# Usage:    run directly and by unit tests; reads one JSON event on stdin
 # Requires: jq, bash .opencode/lint.sh's own tools for the commit gate
 #
 # Event: {"tool":"shell","command":"...","cwd":"..."}
@@ -16,7 +16,7 @@
 #   - lint and hook configuration is denied the same way, with ALLOW_CONFIG_EDIT=1.
 #
 # The prefixes prevent accidental changes; explicit authorization must come from the user.
-# OpenCode's permission hook uses --json-verdict and rejects a failed check.
+# --json-verdict makes the decision machine-readable for callers and tests.
 #
 set -euo pipefail
 IFS=$'\n\t'
@@ -31,7 +31,6 @@ readonly PROTECTED_CONFIGS=(
   .opencode/lint.sh
   .opencode/testing/pdf-prep/ruff.toml
   .opencode/hooks/guard.sh
-  .opencode/plugins/guard/index.ts
   opencode.jsonc
   .github/workflows/gate.yml
 )
