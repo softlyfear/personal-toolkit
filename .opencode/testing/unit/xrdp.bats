@@ -99,6 +99,29 @@ xrdp_scripts() {
   done < <(xrdp_scripts)
 }
 
+@test "ensure_ssh_ufw_rule treats a zero-padded SSH_PORT as decimal" {
+  local calls="${BATS_TEST_TMPDIR}/ufw-calls"
+  while read -r script; do
+    : > "${calls}"
+    run bash -c "
+      source '${REPO_ROOT}/${script}'
+      SUDO=
+      ufw() {
+        if [[ \"\$1\" == status ]]; then
+          return 1
+        fi
+        printf '%s\n' \"\$*\" >> '${calls}'
+      }
+      SSH_PORT=010
+      ensure_ssh_ufw_rule
+    "
+    assert_success
+    # IFS starts with a newline, so "$*" does not join the ufw arguments with a space.
+    grep -qx '10/tcp' "${calls}"
+    grep -qxv '010/tcp' "${calls}"
+  done < <(xrdp_scripts)
+}
+
 @test "parse_sshd_port accepts OpenSSH 10.5 canonical case" {
   while read -r script; do
     run bash -c "source '${REPO_ROOT}/${script}'; printf 'Port 2244\nAddressFamily any\n' | parse_sshd_port"

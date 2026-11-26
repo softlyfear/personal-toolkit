@@ -415,6 +415,78 @@ EOF
   assert_failure 1
 }
 
+@test "parse_cli_args treats a zero-padded port as decimal" {
+  run bash -c "source '${REPO_ROOT}/server-scripts/configuring_server.sh'; parse_cli_args 010; printf '%s' \"\${SSH_PORT}\""
+  assert_success
+  assert_output "10"
+
+  run bash -c "source '${REPO_ROOT}/server-scripts/configuring_server.sh'; parse_cli_args 08; printf '%s' \"\${SSH_PORT}\""
+  assert_success
+  assert_output "8"
+
+  run bash -c "source '${REPO_ROOT}/server-scripts/configuring_server.sh'; parse_cli_args 00"
+  assert_failure 1
+}
+
+@test "rearm_lockout_autorevert restarts an elapsed timer" {
+  local timer="${BATS_TEST_TMPDIR}/timer"
+  local snapshot="${BATS_TEST_TMPDIR}/snapshot"
+  : > "${timer}"
+  : > "${snapshot}"
+
+  run bash -c "
+    source '${REPO_ROOT}/server-scripts/configuring_server.sh'
+    ROLLBACK_AUTOREVERT_INSTALLED=true
+    restarted=false
+    systemctl() {
+      if [[ \"\$1\" == restart && \"\$2\" == hardening-autorevert.timer ]]; then
+        restarted=true
+        return 0
+      fi
+      return 1
+    }
+    rearm_lockout_autorevert '${timer}' '${snapshot}'
+    [[ \"\${restarted}\" == true ]]
+  "
+  assert_success
+}
+
+@test "rearm_lockout_autorevert refuses to continue after the timer has fired" {
+  run --separate-stderr bash -c "
+    source '${REPO_ROOT}/server-scripts/configuring_server.sh'
+    ROLLBACK_AUTOREVERT_INSTALLED=true
+    rearm_lockout_autorevert '${BATS_TEST_TMPDIR}/missing-timer' '${BATS_TEST_TMPDIR}/missing-snapshot'
+    echo STILL_RUNNING
+  "
+  assert_failure 1
+  refute_output --partial "STILL_RUNNING"
+  [[ "${stderr}" == *"already fired"* ]]
+}
+
+@test "rearm_lockout_autorevert warns instead of aborting after success" {
+  run --separate-stderr bash -c "
+    source '${REPO_ROOT}/server-scripts/configuring_server.sh'
+    ROLLBACK_AUTOREVERT_INSTALLED=true
+    SCRIPT_SUCCEEDED=true
+    rearm_lockout_autorevert '${BATS_TEST_TMPDIR}/missing-timer' '${BATS_TEST_TMPDIR}/missing-snapshot'
+    printf '%s' \"\${ROLLBACK_AUTOREVERT_INSTALLED}\"
+  "
+  assert_success
+  assert_output "false"
+  [[ "${stderr}" == *"already fired"* ]]
+}
+
+@test "rearm_lockout_autorevert does nothing when auto-revert was not armed" {
+  run bash -c "
+    source '${REPO_ROOT}/server-scripts/configuring_server.sh'
+    ROLLBACK_AUTOREVERT_INSTALLED=false
+    systemctl() { echo CALLED; return 1; }
+    rearm_lockout_autorevert
+  "
+  assert_success
+  assert_output ""
+}
+
 @test "parse_cli_args rejects --user root" {
   run bash -c "source '${REPO_ROOT}/server-scripts/configuring_server.sh'; parse_cli_args --user root"
   assert_failure 1

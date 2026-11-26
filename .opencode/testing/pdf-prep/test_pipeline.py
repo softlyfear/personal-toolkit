@@ -98,6 +98,16 @@ def test_discover_finds_an_uppercase_pdf_suffix(tmp_path) -> None:
     assert pdfdoc.discover(tmp_path) == [source]
 
 
+def test_page_range_rejects_zero_and_a_reversed_span() -> None:
+    assert list(translate._page_range("2-4", 10)) == [1, 2, 3]
+    # A bare N is the start of an open range, not a single page.
+    assert list(translate._page_range("8", 10)) == [7, 8, 9]
+    with pytest.raises(translate.PdfPrepError, match="ends before"):
+        translate._page_range("5-3", 10)
+    with pytest.raises(translate.PdfPrepError, match="starting at 1"):
+        translate._page_range("0-2", 10)
+
+
 def test_url_gate_rejects_a_url_that_only_contains_the_source_url(tmp_path) -> None:
     blocks = tmp_path / "blocks.json"
     blocks.write_text(

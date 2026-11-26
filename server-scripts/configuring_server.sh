@@ -82,6 +82,8 @@ CLI_PRESET_PASSWORD_FLAG=""
 CONFIRM_WINDOW_MIN=0
 PROVIDER_USER_CLEANUP_FAILED=false
 ROLLBACK_SYSCTL_UNIT_CREATED=false
+ROLLBACK_SYSCTL_UNIT_BACKUP=""
+ROLLBACK_SSHD_LEGACY_DROPIN=""
 ROLLBACK_GAI_MODIFIED=false
 ROLLBACK_GAI_BACKUP=""
 # Set once this script creates the account or grants it sudo — an account that merely
@@ -267,9 +269,13 @@ print_final_summary() {
   echo ""
 
   if [[ "${ROLLBACK_AUTOREVERT_INSTALLED}" == "true" ]]; then
-    sum_note "Auto-revert is armed: SSH and the firewall go back to their pre-hardening state in ${CONFIRM_WINDOW_MIN} min."
-    sum_note "Once the new session above works, cancel it:"
-    sum_cmd "sudo ${AUTOREVERT_CONFIRM}"
+    if systemctl is-active --quiet hardening-autorevert.timer; then
+      sum_note "Auto-revert is armed: SSH and the firewall go back to their pre-hardening state in ${CONFIRM_WINDOW_MIN} min."
+      sum_note "Once the new session above works, cancel it:"
+      sum_cmd "sudo ${AUTOREVERT_CONFIRM}"
+    else
+      sum_note "Auto-revert is NOT active. Do not close this session until a new login works — there is no timer to restore access."
+    fi
     echo ""
   fi
   echo -e "${C_M}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_R}"
@@ -290,6 +296,10 @@ read_tty() {
   if ! tty_is_usable; then
     err "Interactive input requires a TTY. Download first: wget -qO /tmp/setup.sh ${SCRIPT_RAW_URL} && bash /tmp/setup.sh"
   fi
+  # Reset the lockout window before blocking. The timer is armed before these
+  # prompts; without this, pasting a key can consume it and the safety net fires
+  # underneath the run.
+  rearm_lockout_autorevert
   # Opening /dev/tty is not enough: under sudo with stdout redirected (`| tee log`,
   # `> log`) sudo runs without a pty, and the read fails with EIO instead of blocking.
   # Bare `read` would surface that as a raw bash error under set -e.
@@ -482,10 +492,18 @@ prompt_set_password() {
     else
       warn "Passwords did not match or empty. Try again (${attempt}/${max_attempts}):"
     fi
-    IFS= read -rs pass < /dev/tty
+    # Same EIO failure as read_tty, and the same window reset: these reads do not
+    # go through read_tty because they must not echo the password.
+    rearm_lockout_autorevert
+    if ! IFS= read -rs pass < /dev/tty 2> /dev/null; then
+      err "Cannot read your answer from the terminal (end of input or I/O error). Do not redirect the output of this script while it asks questions — drop the '| tee'/'> file' part, or run it as root instead of under sudo."
+    fi
     echo >&2
     info "Confirm password:"
-    IFS= read -rs pass2 < /dev/tty
+    rearm_lockout_autorevert
+    if ! IFS= read -rs pass2 < /dev/tty 2> /dev/null; then
+      err "Cannot read your answer from the terminal (end of input or I/O error). Do not redirect the output of this script while it asks questions — drop the '| tee'/'> file' part, or run it as root instead of under sudo."
+    fi
     echo >&2
 
     if [[ -n "${pass}" && "${pass}" == "${pass2}" ]]; then
@@ -619,9 +637,13 @@ parse_cli_args() {
     esac
   done
 
-  if ! [[ "${SSH_PORT}" =~ ^[0-9]+$ ]] || ((SSH_PORT < 1 || SSH_PORT > 65535)); then
+  # 10# so a zero-padded port is decimal: ((010)) is octal 8, and ((08)) aborts
+  # with "value too great for base" instead of reaching err(). The string is then
+  # rewritten so sshd, UFW and the listeners all see the same port.
+  if ! [[ "${SSH_PORT}" =~ ^[0-9]+$ ]] || ((10#${SSH_PORT} < 1 || 10#${SSH_PORT} > 65535)); then
     err "Invalid SSH port: ${SSH_PORT}"
   fi
+  SSH_PORT="$((10#${SSH_PORT}))"
 }
 
 # =============================================================================
@@ -1065,12 +1087,35 @@ EOF
 }
 
 # OnActiveSec counts from the moment the timer was started, and the timer is armed before
-# the prompts. Restarting it at each point where the run can sit waiting for the operator
-# keeps the window measuring "time to test a login", not "time spent pasting a key".
+# the prompts. Restarting it before each wait keeps the window measuring "time to test a
+# login", not "time spent pasting a key". An elapsed timer is inactive
+# (RemainAfterElapse=no); treating that as "nothing to do" left the summary claiming a
+# safety net that had already fired and would not fire again.
+# Optional path arguments exist so unit tests can point this at a temp tree.
 rearm_lockout_autorevert() {
+  local timer="${1:-${AUTOREVERT_TIMER}}"
+  local snapshot="${2:-${AUTOREVERT_SNAPSHOT}}"
+
   [[ "${ROLLBACK_AUTOREVERT_INSTALLED}" == "true" ]] || return 0
-  systemctl is-active --quiet hardening-autorevert.timer || return 0
-  systemctl restart hardening-autorevert.timer > /dev/null 2>&1 || true
+  if [[ ! -f "${timer}" || ! -f "${snapshot}" ]]; then
+    # The fired helper deletes both. Continuing would re-harden with no way back
+    # while the summary still said the timer was armed. After SCRIPT_SUCCEEDED the
+    # hardening is already in place and err() would skip the credential summary.
+    ROLLBACK_AUTOREVERT_INSTALLED=false
+    if [[ "${SCRIPT_SUCCEEDED}" == "true" ]]; then
+      warn "Auto-revert already fired during this run. Hardening was re-applied afterwards and the timer is gone. Do not close this session until a new login works."
+      return 0
+    fi
+    err "Auto-revert already fired during this run and restored the pre-hardening SSH and firewall state. This run will roll back anything it changed after that. Check access from a new session or the provider console before retrying."
+  fi
+  if ! systemctl restart hardening-autorevert.timer > /dev/null 2>&1; then
+    if [[ "${SCRIPT_SUCCEEDED}" == "true" ]]; then
+      ROLLBACK_AUTOREVERT_INSTALLED=false
+      warn "Could not restart the auto-revert timer. Do not close this session until a new login works."
+      return 0
+    fi
+    err "Could not restart the auto-revert timer — refusing to continue without the lockout safety net"
+  fi
 }
 
 # =============================================================================
@@ -1095,7 +1140,7 @@ rollback_has_state() {
   [[ "${SSH_SOCKET_MASKED}" == "true" || "${SSH_SOCKET_DISABLED}" == "true" ]] && return 0
   [[ "${ROLLBACK_FAIL2BAN_TOUCHED}" == "true" ]] && return 0
   [[ -n "${ROLLBACK_SUDOERS_BACKUP}" || "${ROLLBACK_SUDOERS_CREATED}" == "true" ]] && return 0
-  [[ "${ROLLBACK_SYSCTL_UNIT_CREATED}" == "true" ]] && return 0
+  [[ "${ROLLBACK_SYSCTL_UNIT_CREATED}" == "true" || -n "${ROLLBACK_SYSCTL_UNIT_BACKUP}" ]] && return 0
   [[ "${ROLLBACK_GAI_MODIFIED}" == "true" ]] && return 0
   [[ "${ROLLBACK_UFW_MODIFIED}" == "true" ]] && return 0
   [[ "${ROLLBACK_AUTOREVERT_INSTALLED}" == "true" ]] && return 0
@@ -1131,6 +1176,10 @@ rollback_on_failure() {
     elif [[ "${ROLLBACK_SSHD_DROPIN_HAD_FILE}" == "false" && -f "${SSHD_DROPIN_FILE}" ]]; then
       rm -f "${SSHD_DROPIN_FILE}"
       warn "Removed ${SSHD_DROPIN_FILE}"
+    fi
+    if [[ -n "${ROLLBACK_SSHD_LEGACY_DROPIN}" && -f "${ROLLBACK_SSHD_LEGACY_DROPIN}" ]]; then
+      cp "${ROLLBACK_SSHD_LEGACY_DROPIN}" "${SSHD_DROPIN_DIR}/99-hardening.conf"
+      warn "Restored ${SSHD_DROPIN_DIR}/99-hardening.conf"
     fi
   fi
 
@@ -1195,7 +1244,12 @@ rollback_on_failure() {
   # Same reasoning as discard_sshd_backup: only this rollback reads it.
   [[ -n "${ROLLBACK_SUDOERS_BACKUP}" ]] && rm -f "${ROLLBACK_SUDOERS_BACKUP}"
 
-  if [[ "${ROLLBACK_SYSCTL_UNIT_CREATED}" == "true" ]]; then
+  if [[ -n "${ROLLBACK_SYSCTL_UNIT_BACKUP}" && -f "${ROLLBACK_SYSCTL_UNIT_BACKUP}" ]]; then
+    cp -p "${ROLLBACK_SYSCTL_UNIT_BACKUP}" /etc/systemd/system/sysctl-hardening.service
+    rm -f "${ROLLBACK_SYSCTL_UNIT_BACKUP}"
+    systemctl daemon-reload > /dev/null 2>&1 || true
+    warn "Restored sysctl-hardening.service"
+  elif [[ "${ROLLBACK_SYSCTL_UNIT_CREATED}" == "true" ]]; then
     systemctl disable sysctl-hardening.service > /dev/null 2>&1 || true
     rm -f /etc/systemd/system/sysctl-hardening.service
     systemctl daemon-reload > /dev/null 2>&1 || true
@@ -1513,6 +1567,15 @@ backup_sshd_config() {
     ROLLBACK_SSHD_DROPIN_BACKUP="${SSHD_DROPIN_FILE}.bak_${ROLLBACK_ID}"
     cp "${SSHD_DROPIN_FILE}" "${ROLLBACK_SSHD_DROPIN_BACKUP}"
   fi
+
+  # Older releases wrote 99-hardening.conf. apply_sshd_hardening deletes it; a
+  # failed run must put it back or the previous drop-in is gone while the new
+  # one is rolled back.
+  local legacy="${SSHD_DROPIN_DIR}/99-hardening.conf"
+  if [[ -f "${legacy}" ]]; then
+    ROLLBACK_SSHD_LEGACY_DROPIN="${legacy}.bak_${ROLLBACK_ID}"
+    cp "${legacy}" "${ROLLBACK_SSHD_LEGACY_DROPIN}"
+  fi
 }
 
 # Same reasoning as discard_ufw_backup: only the rollback reads these, so on success they
@@ -1520,8 +1583,10 @@ backup_sshd_config() {
 discard_sshd_backup() {
   [[ -n "${ROLLBACK_SSHD_BACKUP}" ]] && rm -f "${ROLLBACK_SSHD_BACKUP}"
   [[ -n "${ROLLBACK_SSHD_DROPIN_BACKUP}" ]] && rm -f "${ROLLBACK_SSHD_DROPIN_BACKUP}"
+  [[ -n "${ROLLBACK_SSHD_LEGACY_DROPIN}" ]] && rm -f "${ROLLBACK_SSHD_LEGACY_DROPIN}"
   ROLLBACK_SSHD_BACKUP=""
   ROLLBACK_SSHD_DROPIN_BACKUP=""
+  ROLLBACK_SSHD_LEGACY_DROPIN=""
   return 0
 }
 
@@ -1971,6 +2036,15 @@ configure_ipv6_preference() {
 install_sysctl_reapply_unit() {
   local unit="/etc/systemd/system/sysctl-hardening.service"
 
+  # Flag before the write. On a re-run the unit already exists; deleting it in
+  # rollback would drop the previous run's reboot persistence.
+  if [[ -f "${unit}" ]]; then
+    ROLLBACK_SYSCTL_UNIT_BACKUP="${unit}.bak_${ROLLBACK_ID}"
+    cp -p "${unit}" "${ROLLBACK_SYSCTL_UNIT_BACKUP}"
+  else
+    ROLLBACK_SYSCTL_UNIT_CREATED=true
+  fi
+
   cat > "${unit}" << 'EOF'
 [Unit]
 Description=Re-apply sysctl hardening after the network is up
@@ -1986,7 +2060,6 @@ ExecStart=/sbin/sysctl -p /etc/sysctl.d/98-hardening.conf
 WantedBy=multi-user.target
 EOF
 
-  ROLLBACK_SYSCTL_UNIT_CREATED=true
   systemctl daemon-reload
   systemctl enable sysctl-hardening.service > /dev/null 2>&1 \
     || warn "Could not enable sysctl-hardening.service; sysctl values may not survive reboot"
@@ -2264,6 +2337,7 @@ EOF
   discard_fail2ban_backup
   discard_sudoers_backup
   [[ -n "${ROLLBACK_GAI_BACKUP}" ]] && rm -f "${ROLLBACK_GAI_BACKUP}"
+  [[ -n "${ROLLBACK_SYSCTL_UNIT_BACKUP}" ]] && rm -f "${ROLLBACK_SYSCTL_UNIT_BACKUP}"
 
   sep
   info "Removing provider default user..."

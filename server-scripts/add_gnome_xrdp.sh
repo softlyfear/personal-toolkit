@@ -50,6 +50,14 @@ require_tty() {
     || err "This script prompts for a username and password: run it from a terminal, not a pipe"
 }
 
+# Under sudo with stdout redirected there is no pty: the read fails with EIO
+# instead of blocking, and a bare read surfaces that as a raw bash error.
+read_tty() {
+  if ! IFS= read -r "$1" < /dev/tty 2> /dev/null; then
+    err "Cannot read your answer from the terminal (end of input or I/O error). Do not redirect the output of this script while it asks questions."
+  fi
+}
+
 wait_for_dpkg_lock() {
   command -v fuser > /dev/null 2>&1 || return 0
   local waited=0
@@ -67,10 +75,16 @@ wait_for_dpkg_lock() {
 require_ubuntu() {
   local os_id=""
 
-  [[ -r /etc/os-release ]] || err "/etc/os-release not found; only Ubuntu is supported"
-  os_id="$(awk -F= '$1 == "ID" {gsub(/^"|"$/, "", $2); print tolower($2); exit}' /etc/os-release)"
-  [[ "${os_id}" == "ubuntu" ]] \
-    || err "This script supports only Ubuntu"
+  # Same warn-only distro check as the other scripts: apt-get missing is fatal,
+  # a non-ubuntu ID is not. A hard block here refused Ubuntu derivatives the
+  # rest of the repo still runs on.
+  command -v apt-get > /dev/null 2>&1 || err "This script requires Ubuntu (apt-get not found)"
+
+  if [[ -r /etc/os-release ]]; then
+    os_id="$(awk -F= '$1 == "ID" {gsub(/^"|"$/, "", $2); print tolower($2); exit}' /etc/os-release)"
+    [[ "${os_id}" == "ubuntu" ]] \
+      || warn "Unrecognized distro ID '${os_id}' — proceeding since apt-get is present, but this script is tested only on Ubuntu (latest LTS)"
+  fi
 }
 
 prompt_new_user() {
@@ -85,7 +99,7 @@ prompt_new_user() {
     else
       warn "Invalid username. Use a-z, 0-9, _, - (try again ${attempt}/${max_attempts}):"
     fi
-    read -r raw < /dev/tty
+    read_tty raw
     raw="$(printf '%s' "${raw}" | LC_ALL=C tr -cd '[:alnum:]_-' | tr '[:upper:]' '[:lower:]')"
     NEW_USER="${raw:-admin}"
 
@@ -159,9 +173,11 @@ ensure_ssh_ufw_rule() {
     fi
   fi
 
-  if ! [[ "${ssh_port}" =~ ^[0-9]+$ ]] || ! ((ssh_port >= 1 && ssh_port <= 65535)); then
+  # 10# so 010 is port 10, not octal 8, and 08 does not abort the arithmetic test.
+  if ! [[ "${ssh_port}" =~ ^[0-9]+$ ]] || ! ((10#${ssh_port} >= 1 && 10#${ssh_port} <= 65535)); then
     err "Could not safely determine the SSH port; set it via SSH_PORT"
   fi
+  ssh_port="$((10#${ssh_port}))"
 
   # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
   if ! ${SUDO} ufw status numbered 2> /dev/null | ufw_has_open_ssh_rule "${ssh_port}"; then
@@ -195,7 +211,7 @@ prompt_rdp_source_ip() {
   echo ""
   info "Optional: restrict RDP access to a single source IP (recommended)."
   info "Enter trusted IPv4 (example: 203.0.113.10) or leave empty for open access:"
-  read -r raw < /dev/tty
+  read_tty raw
   RDP_SOURCE_IP="$(sanitize_ipv4_input "${raw}")"
 }
 

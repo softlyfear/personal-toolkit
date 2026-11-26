@@ -195,10 +195,14 @@ def _page_range(spec: str | None, total: int) -> range:
     match = re.fullmatch(r"\s*(\d+)\s*(?:-\s*(\d+))?\s*", spec)
     if not match:
         raise PdfPrepError(f"Invalid page range {spec!r}; expected N or N-M")
-    first = max(1, int(match.group(1)))
+    first = int(match.group(1))
     last = int(match.group(2) or total)
+    if first < 1 or last < 1:
+        raise PdfPrepError(f"Page range {spec!r} must use pages starting at 1")
     if first > total:
         raise PdfPrepError(f"Page range {spec!r} starts past the last page ({total})")
+    if last < first:
+        raise PdfPrepError(f"Page range {spec!r} ends before it starts")
     return range(first - 1, min(total, last))
 
 

@@ -98,7 +98,11 @@ pick_interactive() {
 
   for tool in "${TOOLS[@]}"; do
     printf 'Install %s? [y/N]: ' "${tool}" >&2
-    IFS= read -r ans < /dev/tty
+    # Under sudo with stdout redirected there is no pty: the read fails with EIO
+    # instead of blocking, and a bare read surfaces that as a raw bash error.
+    if ! IFS= read -r ans < /dev/tty 2> /dev/null; then
+      err "Cannot read your answer from the terminal (end of input or I/O error). Do not redirect the output of this script while it asks questions."
+    fi
     if [[ "${ans}" =~ ^[Yy]$ ]]; then
       selected+=("${tool}")
     fi
