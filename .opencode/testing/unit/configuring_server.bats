@@ -415,6 +415,11 @@ EOF
   assert_failure 1
 }
 
+@test "parse_cli_args rejects overflowing SSH ports before arithmetic" {
+  run bash -c "source '${REPO_ROOT}/server-scripts/configuring_server.sh'; parse_cli_args 18446744073709551624"
+  assert_failure 1
+}
+
 @test "parse_cli_args treats a zero-padded port as decimal" {
   run bash -c "source '${REPO_ROOT}/server-scripts/configuring_server.sh'; parse_cli_args 010; printf '%s' \"\${SSH_PORT}\""
   assert_success
@@ -423,6 +428,10 @@ EOF
   run bash -c "source '${REPO_ROOT}/server-scripts/configuring_server.sh'; parse_cli_args 08; printf '%s' \"\${SSH_PORT}\""
   assert_success
   assert_output "8"
+
+  run bash -c "source '${REPO_ROOT}/server-scripts/configuring_server.sh'; parse_cli_args 0000000000000065535; printf '%s' \"\${SSH_PORT}\""
+  assert_success
+  assert_output "65535"
 
   run bash -c "source '${REPO_ROOT}/server-scripts/configuring_server.sh'; parse_cli_args 00"
   assert_failure 1

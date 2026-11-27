@@ -133,6 +133,20 @@ xrdp_scripts() {
   done < <(xrdp_scripts)
 }
 
+@test "ensure_ssh_ufw_rule rejects overflowing SSH ports without calling ufw" {
+  while read -r script; do
+    run bash -c "
+      source '${REPO_ROOT}/${script}'
+      SUDO=
+      ufw() { echo 'unexpected ufw call'; }
+      SSH_PORT=18446744073709551624
+      ensure_ssh_ufw_rule
+    "
+    assert_failure 1
+    refute_output --partial "unexpected ufw call"
+  done < <(xrdp_scripts)
+}
+
 @test "valid_ipv4 rejects octets above 255 and keeps a normal address" {
   while read -r script; do
     run bash -c "source '${REPO_ROOT}/${script}'; valid_ipv4 203.0.113.10"

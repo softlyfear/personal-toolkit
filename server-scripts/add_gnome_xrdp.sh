@@ -173,11 +173,11 @@ ensure_ssh_ufw_rule() {
     fi
   fi
 
-  # 10# so 010 is port 10, not octal 8, and 08 does not abort the arithmetic test.
-  if ! [[ "${ssh_port}" =~ ^[0-9]+$ ]] || ! ((10#${ssh_port} >= 1 && 10#${ssh_port} <= 65535)); then
+  # Strip padding and bound the decimal length before Bash arithmetic can wrap.
+  ssh_port="${ssh_port#"${ssh_port%%[!0]*}"}"
+  if ! [[ "${ssh_port}" =~ ^[1-9][0-9]{0,4}$ ]] || ((ssh_port > 65535)); then
     err "Could not safely determine the SSH port; set it via SSH_PORT"
   fi
-  ssh_port="$((10#${ssh_port}))"
 
   # shellcheck disable=SC2310 # predicate; its return code is handled by this conditional
   if ! ${SUDO} ufw status numbered 2> /dev/null | ufw_has_open_ssh_rule "${ssh_port}"; then

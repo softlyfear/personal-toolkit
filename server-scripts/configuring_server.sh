@@ -637,13 +637,12 @@ parse_cli_args() {
     esac
   done
 
-  # 10# so a zero-padded port is decimal: ((010)) is octal 8, and ((08)) aborts
-  # with "value too great for base" instead of reaching err(). The string is then
-  # rewritten so sshd, UFW and the listeners all see the same port.
-  if ! [[ "${SSH_PORT}" =~ ^[0-9]+$ ]] || ((10#${SSH_PORT} < 1 || 10#${SSH_PORT} > 65535)); then
+  # Strip padding and bound the decimal length before Bash arithmetic can wrap.
+  local port="${SSH_PORT#"${SSH_PORT%%[!0]*}"}"
+  if ! [[ "${port}" =~ ^[1-9][0-9]{0,4}$ ]] || ((port > 65535)); then
     err "Invalid SSH port: ${SSH_PORT}"
   fi
-  SSH_PORT="$((10#${SSH_PORT}))"
+  SSH_PORT="${port}"
 }
 
 # =============================================================================
