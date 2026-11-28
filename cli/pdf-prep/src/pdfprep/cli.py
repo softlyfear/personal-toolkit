@@ -132,13 +132,10 @@ def cmd_split(args, cfg: Config) -> int:
                     f"{source.name}: {len(doc_info.sections)} sections re-read from the OCR "
                     f"text layer ({doc_info.toc_source})"
                 )
-            result = split.split_source(staged, cfg, doc_info)
-            if engine:
-                result.ocr_applied = True
-                result.ocr_engine = engine
-                result.notes.append(f"OCR text layer added to {ocr_pages} pages")
-                split.write_manifest(result)
-        except PdfPrepError as exc:
+            result = split.split_source(
+                staged, cfg, doc_info, ocr_pages=ocr_pages, ocr_engine=engine
+            )
+        except (OSError, PdfPrepError) as exc:
             error(str(exc))
             failures += 1
             continue
@@ -169,8 +166,7 @@ def cmd_split(args, cfg: Config) -> int:
                     ["part", "pages", "size_mb", "starting section"],
                 )
             )
-        if not _print_checks("validation", split.validate(result, cfg)):
-            failures += 1
+        _print_checks("validation", result.checks)
         for part in result.parts:
             if part.forced_split:
                 warn(f"{part.file}: forced split — {part.forced_split_reason}")

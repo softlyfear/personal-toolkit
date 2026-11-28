@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import shutil
+import tempfile
+
 import pymupdf
 import pytest
 from pdfprep import compress, config, ocr, pdfdoc, split, translate
@@ -90,6 +93,65 @@ def test_a_later_run_of_another_manual_does_not_inherit_the_slug(tmp_path) -> No
     second_slugs = pdfdoc.unique_slugs([second], tmp_path, result)
     assert second_slugs[second] != "manual"
     assert (result / "manual--part_001_intro.pdf").is_file()
+
+
+def test_ocr_split_keeps_the_original_slug_owner(make_pdf) -> None:
+    source = make_pdf("manual", 2, illustrated)
+    cfg = config.load()
+    cfg.work_dir.mkdir(parents=True)
+    staged = cfg.work_dir / "manual--ocr.pdf"
+    shutil.copyfile(source, staged)
+    info = pdfdoc.inspect(source)
+
+    split.split_source(staged, cfg, info)
+
+    staged.unlink()
+    assert pdfdoc.slug_owner(cfg.result_dir, info.slug) == pdfdoc.source_key(source)
+    assert pdfdoc.unique_slugs([source], cfg.task_dir, cfg.result_dir)[source] == info.slug
+
+
+def test_split_rollback_restores_only_previous_artifacts(tmp_path, monkeypatch) -> None:
+    result_dir = tmp_path / "result"
+    result_dir.mkdir()
+    old = result_dir / "manual--part_001_previous.pdf"
+    partial = result_dir / "manual--part_001_partial.pdf"
+    unrelated = result_dir / "manual--translated.pdf"
+    old.write_bytes(b"old")
+    unrelated.write_bytes(b"unrelated")
+    create_stash = tempfile.mkdtemp
+    stash_locations = []
+
+    def on_result_filesystem(*args, **kwargs):
+        stash_locations.append(kwargs.get("dir"))
+        return create_stash(*args, **kwargs)
+
+    monkeypatch.setattr(split.tempfile, "mkdtemp", on_result_filesystem)
+    with (
+        pytest.raises(PdfPrepError, match="write failed"),
+        split._held_previous_run(result_dir, "manual", tmp_path / "manual.pdf"),
+    ):
+        partial.write_bytes(b"partial")
+        raise PdfPrepError("write failed")
+
+    assert {path.name: path.read_bytes() for path in result_dir.iterdir()} == {
+        old.name: b"old",
+        unrelated.name: b"unrelated",
+    }
+    assert stash_locations == [result_dir]
+
+
+def test_failed_split_validation_keeps_the_last_valid_run(make_pdf, monkeypatch) -> None:
+    source = make_pdf("manual", 2, illustrated)
+    cfg = config.load()
+    info = pdfdoc.inspect(source)
+    split.split_source(source, cfg, info)
+    previous = {path.name: path.read_bytes() for path in cfg.result_dir.iterdir()}
+    monkeypatch.setattr(split, "validate", lambda *_: [("coverage", "fail", "missing part")])
+
+    with pytest.raises(PdfPrepError, match="coverage: missing part"):
+        split.split_source(source, cfg, info)
+
+    assert {path.name: path.read_bytes() for path in cfg.result_dir.iterdir()} == previous
 
 
 def test_discover_finds_an_uppercase_pdf_suffix(tmp_path) -> None:

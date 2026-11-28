@@ -67,6 +67,7 @@ class SplitResult:
     ocr_engine: str | None = None
     compressed_from: int = 0
     compressed_to: int = 0
+    checks: list[tuple[str, str, str]] = field(default_factory=list)
 
 
 def _write_range(
@@ -600,33 +601,53 @@ def _held_previous_run(result_dir: Path, slug: str, source: Path):
     owner = slug_owner(result_dir, slug)
     if owner and owner != source_key(source):
         raise PdfPrepError(f"{source.name}: result slug {slug!r} belongs to another document")
-    stash = Path(tempfile.mkdtemp(prefix=f".{slug}-previous-"))
+    stash = Path(tempfile.mkdtemp(prefix=f".{slug}-previous-", dir=result_dir))
     moved = 0
+    ready = False
     try:
         for path in _previous_outputs(result_dir, slug):
             path.rename(stash / path.name)
             moved += 1
+        ready = True
         yield moved
-    except Exception:
-        for path in list(stash.iterdir()):
-            target = result_dir / path.name
-            if target.exists():
-                target.unlink()
-            path.rename(target)
+    except BaseException:
+        if ready:
+            for path in _previous_outputs(result_dir, slug):
+                path.unlink()
+        for path in stash.iterdir():
+            path.replace(result_dir / path.name)
+        stash.rmdir()
         raise
     else:
         shutil.rmtree(stash, ignore_errors=True)
-    finally:
-        if stash.exists():
-            shutil.rmtree(stash, ignore_errors=True)
 
 
-def split_source(source: Path, cfg: Config, doc_info: DocInfo) -> SplitResult:
+def split_source(
+    source: Path,
+    cfg: Config,
+    doc_info: DocInfo,
+    *,
+    ocr_pages: int = 0,
+    ocr_engine: str | None = None,
+) -> SplitResult:
     result_dir = cfg.result_dir
     result_dir.mkdir(parents=True, exist_ok=True)
-    claim_slug(result_dir, doc_info.slug, source)
-    with _held_previous_run(result_dir, doc_info.slug, source) as replaced:
-        return _split_prepared(source, cfg, doc_info, replaced)
+    with _held_previous_run(result_dir, doc_info.slug, doc_info.path) as replaced:
+        result = _split_prepared(source, cfg, doc_info, replaced)
+        if ocr_engine:
+            result.ocr_applied = True
+            result.ocr_engine = ocr_engine
+            result.notes.append(f"OCR text layer added to {ocr_pages} pages")
+        write_manifest(result)
+        result.checks = validate(result, cfg)
+        failed = [f"{name}: {detail}" for name, status, detail in result.checks if status == "fail"]
+        if failed:
+            raise PdfPrepError(
+                f"{doc_info.path.name}: split validation failed: " + "; ".join(failed)
+            )
+        if not slug_owner(result_dir, doc_info.slug):
+            claim_slug(result_dir, doc_info.slug, doc_info.path)
+        return result
 
 
 def _split_prepared(source: Path, cfg: Config, doc_info: DocInfo, replaced: int) -> SplitResult:
@@ -642,7 +663,6 @@ def _split_prepared(source: Path, cfg: Config, doc_info: DocInfo, replaced: int)
             _branch_b(doc, result, cfg)
         finally:
             doc.close()
-        write_manifest(result)
         return result
 
     cfg.work_dir.mkdir(parents=True, exist_ok=True)
@@ -739,5 +759,4 @@ def _split_prepared(source: Path, cfg: Config, doc_info: DocInfo, replaced: int)
 
     if staged.exists():
         staged.unlink()
-    write_manifest(result)
     return result
